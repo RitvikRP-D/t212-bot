@@ -17,8 +17,18 @@ function start(bus) {
   // any agent calls this: sym must be a Yahoo-style T212-tradable symbol
   bus.queueSignal = (sym, conf, reason, src) => {
     if (conf < QUEUE_MIN_CONF) return;
-    if (marketOpen(sym)) return;            // venue open → trader handles it live
     if (state.t212.positions[sym]) return;  // already holding
+    // CRYPTO & COMMODITIES: fire immediately, don't queue.
+    // T212 will fill them as soon as their venue opens; janitor cleans any stale orders.
+    if ((src === 'crypto' || src === 'commodity') && bus.market[sym] && bus.market[sym].price != null) {
+      const mk = bus.market[sym];
+      mk.queuedBoost = { conf: +conf.toFixed(2), reason: `${src} 24/7 signal: ${reason.slice(0, 150)}`, until: Date.now() + 30 * 60e3 };
+      if (bus.tryEnter) bus.tryEnter(sym, mk);
+      bus.allocStatus.fired++;
+      return;
+    }
+    // STOCKS: queue until venue open
+    if (marketOpen(sym)) return;            // venue open → trader handles it live
     const q = state.queue[sym];
     if (!q || conf > q.conf) {
       state.queue[sym] = { conf: +conf.toFixed(2), reason: reason.slice(0, 200), src, queuedAt: q ? q.queuedAt : Date.now() };

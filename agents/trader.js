@@ -160,7 +160,11 @@ function start(bus) {
     }
     mk.lastConf = +conf.toFixed(2);
     mk.lastWhy = ev.reasons.join(' · ') + (lm !== 1 ? ` · learning ×${lm.toFixed(2)}` : '') + tvNote;
-    if (state.pause || conf < 0.55 || !marketOpen(sym) || openCount() >= MAX_OPEN) return;
+    // CRYPTO & COMMODITY signals can fire 24/7; stocks REQUIRE marketOpen() during closed hours
+    const isCryptoCommodity = (bus.crypto && Object.values(bus.crypto).find(c => c.etp === sym)) ||
+                               (bus.commod && Object.values(bus.commod).find(c => c.etp === sym));
+    const mustBeOpenVenue = !isCryptoCommodity; // stocks must be on an open venue
+    if (state.pause || conf < 0.55 || (mustBeOpenVenue && !marketOpen(sym)) || openCount() >= MAX_OPEN) return;
     if (bus.riskGate && !bus.riskGate.canEnter()) return; // RISK GUARDIAN gate
     // HOLIDAY/HALT GUARD: the clock can say "open" on an exchange holiday (learned
     // this on July 4th weekend — 26 orders queued and blocked £9,996 of cash).

@@ -17,6 +17,10 @@ const ETP_RE = {
 };
 const POS_RE = /(etf approv|inflow|adoption|halving|institutional|accumulat|rally|surge|all-time high|bullish|upgrade|integrat|partnership|legal (win|victory)|spot etf)/gi;
 const NEG_RE = /(hack|exploit|ban|crackdown|lawsuit|sec sue|fraud|outflow|selloff|liquidat|crash|plunge|bankrupt|delist|scam|rug)/gi;
+// BOOTSTRAP: T212 API rate-limits instrument fetches; meanwhile, start trading with these known ETPs
+const BOOTSTRAP_ETPs = {
+  ETH: 'ETHP.L', BTC: 'BTCP.L', AVAX: 'MLAC1.L', SOL: null, BNB: null, XRP: null,
+};
 
 function start(bus) {
   bus.crypto = {};       // COIN -> {price, rsi, conf, why, ...}
@@ -24,16 +28,21 @@ function start(bus) {
   bus.cryptoStatus = { scanned: 0, errors: 0, coins: COINS.length, etpsMapped: 0, lastSym: null, topConf: null };
   let idx = 0;
 
-  // find each coin's tradable T212 ETP once the expanded universe arrives
+  // find each coin's tradable T212 ETP; bootstrap with known ETPs, then expand from universe
   function mapETPs() {
     let mapped = 0;
+    for (const [coin, etp] of Object.entries(BOOTSTRAP_ETPs)) {
+      if (etp) { (bus.crypto[coin] = bus.crypto[coin] || {}).etp = etp; mapped++; }
+    }
+    // also try the full-name regex match if the universe expanded
     for (const [coin, re] of Object.entries(ETP_RE)) {
-      const hit = bus.universe.find(u => u.t212 && re.test(u.name) && !/short|-1x|3x|2x|inverse/i.test(u.name));
+      if (bus.crypto[coin]?.etp) continue; // already have a bootstrap one
+      const hit = bus.universe && bus.universe.length > 1000 && bus.universe.find(u => u.t212 && re.test(u.name) && !/short|-1x|3x|2x|inverse/i.test(u.name));
       if (hit) { (bus.crypto[coin] = bus.crypto[coin] || {}).etp = hit.y; mapped++; }
     }
     bus.cryptoStatus.etpsMapped = mapped;
   }
-  setInterval(mapETPs, 120000); setTimeout(mapETPs, 20000);
+  mapETPs(); setInterval(mapETPs, 120000);
 
   async function scanCoin(coin) {
     try {

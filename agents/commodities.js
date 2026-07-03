@@ -35,6 +35,23 @@ const TARGETS = [
   { key: 'broad',     fut: null,    re: /all commodities|broad commodit|bloomberg commodity/i },
 ];
 
+// BOOTSTRAP: T212 API rate-limits instrument fetches; start with these known ETCs
+const BOOTSTRAP_ETCs = {
+  gold: { etp: 'RMAU.L', name: 'Royal Mint Responsibly Sourced Physical Gold' },
+  silver: { etp: 'PHAG.L', name: 'WisdomTree Physical Silver' },
+  platinum: { etp: 'SPPT.L', name: 'WisdomTree Physical Platinum' },
+  palladium: null,
+  copper: null,
+  'wti-oil': null, 'brent-oil': null, 'natgas': null,
+  wheat: { etp: 'WEAT.L', name: 'Wisdomtree Wheat' },
+  corn: { etp: 'CORN.MI', name: 'WisdomTree Corn' },
+  soybeans: { etp: 'ESOY.MI', name: 'WisdomTree Soybeans - EUR Daily Hedged' },
+  coffee: { etp: 'COFF.L', name: 'WisdomTree Coffee' },
+  sugar: { etp: 'SUGA.L', name: 'WisdomTree Sugar' },
+  cocoa: null, cotton: null, cattle: null,
+  aluminium: null, nickel: null, zinc: null, uranium: null, lithium: null, carbon: null, agri: null, broad: null,
+};
+
 function start(bus) {
   bus.commod = {};   // key -> {price, rsi, conf, why, etp}
   bus.commodStatus = { scanned: 0, errors: 0, targets: TARGETS.length, mapped: 0, lastSym: null, topConf: null };
@@ -44,14 +61,19 @@ function start(bus) {
   const ISSUER_RE = /wisdomtree|ishares|invesco|xtrackers|amundi|vaneck|hanetf|global x|l&g|etfs |\betc\b|\betp\b|physical/i;
   function mapETCs() {
     let mapped = 0;
+    // BOOTSTRAP: use known ETCs first
+    for (const [key, info] of Object.entries(BOOTSTRAP_ETCs)) {
+      if (info && info.etp) { (bus.commod[key] = bus.commod[key] || {}).etp = info.etp; (bus.commod[key]).etpName = info.name; mapped++; }
+    }
+    // then try regex matching if universe expanded
     for (const t of TARGETS) {
-      const hit = bus.universe.find(u => u.t212 && t.re.test(u.name) && ISSUER_RE.test(u.name) && !/short|-1x|3x|2x|inverse|leveraged/i.test(u.name));
+      if (bus.commod[t.key]?.etp) continue; // already bootstrapped
+      const hit = bus.universe && bus.universe.length > 1000 && bus.universe.find(u => u.t212 && t.re.test(u.name) && ISSUER_RE.test(u.name) && !/short|-1x|3x|2x|inverse|leveraged/i.test(u.name));
       if (hit) { (bus.commod[t.key] = bus.commod[t.key] || {}).etp = hit.y; (bus.commod[t.key]).etpName = hit.name; mapped++; }
-      else if (bus.commod[t.key]) { delete bus.commod[t.key].etp; delete bus.commod[t.key].etpName; }
     }
     bus.commodStatus.mapped = mapped;
   }
-  setInterval(mapETCs, 120000); setTimeout(mapETCs, 25000);
+  mapETCs(); setInterval(mapETCs, 120000);
 
   async function scan(t) {
     const c = bus.commod[t.key] = bus.commod[t.key] || {};
