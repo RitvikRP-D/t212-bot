@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>T212 Virtual Trader — LIVE</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:'SF Mono','Menlo',monospace; background:#0a0e14; color:#c9d1d9; padding:14px; }
+  h1 { color:#58c7ff; font-size:17px; }
+  .sub { color:#8b949e; font-size:11px; margin:4px 0 10px; }
+  .dot { display:inline-block; width:9px; height:9px; border-radius:50%; background:#00ff88; margin-right:6px; animation:bl 1s infinite; }
+  .dot.err { background:#ff4444; animation:none; }
+  @keyframes bl { 50% {opacity:.3;} }
+  .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); gap:8px; margin-bottom:10px; }
+  .card { background:#11161f; border:1px solid #1f2733; border-radius:8px; padding:9px; text-align:center; }
+  .card .l { font-size:9px; color:#8b949e; text-transform:uppercase; letter-spacing:1px; }
+  .card .v { font-size:15px; font-weight:bold; margin-top:3px; }
+  .agents { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:8px; margin-bottom:12px; }
+  .agent { background:#0d1320; border:1px solid #1f2733; border-left:3px solid #58a6ff; border-radius:6px; padding:8px; font-size:10.5px; }
+  .agent b { color:#58a6ff; display:block; margin-bottom:3px; font-size:10px; text-transform:uppercase; }
+  .agent.ok { border-left-color:#00ff88; } .agent.bad { border-left-color:#ff5566; }
+  .green{color:#00ff88;} .red{color:#ff5566;} .yellow{color:#ffd866;} .blue{color:#58c7ff;}
+  h2 { color:#58a6ff; font-size:12px; margin:14px 0 6px; text-transform:uppercase; letter-spacing:1px; }
+  .wrap { overflow-x:auto; }
+  table { width:100%; border-collapse:collapse; font-size:11px; white-space:nowrap; }
+  th { text-align:left; color:#8b949e; font-size:9px; text-transform:uppercase; padding:5px 6px; border-bottom:1px solid #1f2733; }
+  td { padding:5px 6px; border-bottom:1px solid #141a24; }
+  .sig-BUY{color:#00ff88;font-weight:bold;} .sig-SELL{color:#ff5566;font-weight:bold;}
+  .muted { color:#8b949e; font-size:10px; }
+  .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+  @media (max-width:800px){ .grid2{grid-template-columns:1fr;} }
+  canvas { width:100%; height:70px; background:#11161f; border:1px solid #1f2733; border-radius:8px; }
+  .hitem { padding:4px 0; border-bottom:1px solid #141a24; font-size:10.5px; }
+  .badge { display:inline-block; min-width:24px; text-align:center; border-radius:4px; padding:1px 4px; font-size:9.5px; font-weight:bold; margin-right:5px; }
+  .b-pos{background:#00331f;color:#00ff88;} .b-neg{background:#33141a;color:#ff5566;} .b-neu{background:#1f2733;color:#8b949e;}
+  .ledger { font-size:9px; padding:1px 5px; border-radius:3px; font-weight:bold; }
+  .led-T212-PRACTICE { background:#00263d; color:#58c7ff; }
+  .led-VIRTUAL { background:#241f33; color:#c39cff; }
+  button { background:#1f2733; color:#c9d1d9; border:1px solid #303d4a; border-radius:6px; padding:5px 12px; cursor:pointer; font-family:inherit; font-size:11px; }
+</style>
+</head>
+<body>
+  <h1><span class="dot" id="dot"></span>T212 VIRTUAL TRADER <span class="muted">practice account only · separate project</span></h1>
+  <div class="sub">universe <b id="uni">…</b> instruments · phone: <b id="lan">…</b> · <span id="clock"></span> <button id="pauseBtn" onclick="fetch('/api/pause',{method:'POST'})" style="margin-left:8px;">pause</button></div>
+
+  <div class="agents" id="agents"></div>
+
+  <div class="cards">
+    <div class="card"><div class="l">T212 Practice Cash</div><div class="v blue" id="c-t212">…</div></div>
+    <div class="card"><div class="l">Internal Ledger</div><div class="v" id="c-paper">…</div></div>
+    <div class="card"><div class="l">Total Equity</div><div class="v" id="c-eq">…</div></div>
+    <div class="card"><div class="l">Realized P&L</div><div class="v" id="c-pnl">…</div></div>
+    <div class="card"><div class="l">Open / Closed</div><div class="v yellow" id="c-oc">…</div></div>
+    <div class="card"><div class="l">Win Rate</div><div class="v" id="c-wr">…</div></div>
+    <div class="card"><div class="l">Markets Open</div><div class="v" id="c-mo">…</div></div>
+    <div class="card"><div class="l">Fear & Greed</div><div class="v blue" id="c-fng">…</div></div>
+  </div>
+
+  <h2>Equity</h2>
+  <canvas id="spark" width="1200" height="70"></canvas>
+
+  <h2>Top Signals <span class="muted">(bot confidence across whole universe)</span></h2>
+  <div class="wrap"><table>
+    <thead><tr><th></th><th>Symbol</th><th>Price</th><th>24h</th><th>RSI</th><th>Conf</th><th>Bot's read</th><th>At</th></tr></thead>
+    <tbody id="mkt"></tbody>
+  </table></div>
+
+  <h2>Open Positions</h2>
+  <div class="wrap"><table>
+    <thead><tr><th>Ledger</th><th>Symbol</th><th>Invested</th><th>Entry</th><th>Now</th><th>Unrealized</th><th>Conf</th><th>Why bought</th></tr></thead>
+    <tbody id="pos"></tbody>
+  </table></div>
+
+  <div class="grid2">
+    <div>
+      <h2>Trade Log</h2>
+      <div class="wrap"><table>
+        <thead><tr><th>Time</th><th>Ledger</th><th>Sym</th><th>Act</th><th>Price</th><th>P&L</th><th>Reason</th></tr></thead>
+        <tbody id="hist"></tbody>
+      </table></div>
+    </div>
+    <div>
+      <h2>News Agent <span class="muted" id="news-upd"></span></h2>
+      <div id="heads"></div>
+      <h2>Congress Trades</h2>
+      <div id="congress" class="muted">loading…</div>
+      <h2>Learning</h2>
+      <div class="wrap"><table><thead><tr><th>Strategy</th><th>W</th><th>L</th><th>P&L</th></tr></thead><tbody id="learn"></tbody></table></div>
+    </div>
+  </div>
+
+<script>
+function fmt(n,d=2){ return Number(n).toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d}); }
+function px(n){ n=Number(n); return n>=100?fmt(n,2):n>=1?fmt(n,4):fmt(n,6); }
+function cls(n){ return n>=0?'green':'red'; }
+function agentBox(name, ok, lines){
+  return `<div class="agent ${ok===true?'ok':ok===false?'bad':''}"><b>${name}</b>${lines.filter(Boolean).map(l=>`<div>${l}</div>`).join('')}</div>`;
+}
+function render(s){
+  document.getElementById('clock').textContent = 'tick ' + s.time + (s.pause ? ' · ⏸ PAUSED' : '');
+  document.getElementById('pauseBtn').textContent = s.pause ? 'resume' : 'pause';
+  document.getElementById('dot').className = 'dot' + ((s.scan?.openNow||0) > 0 || s.t212?.connected ? '' : ' err');
+  document.getElementById('lan').textContent = 'http://' + s.lan;
+  document.getElementById('uni').textContent = s.universe;
+
+  document.getElementById('agents').innerHTML =
+    agentBox('① Scanner', (s.scan?.openNow||0)>0 ? true : null, [`${s.scan?.openNow||0} symbols in open markets`, `scans ${s.scan?.scanned||0} · errors ${s.scan?.errors||0}`, s.scan?.openNow ? `full pass ~${s.scan.fullPassMins} min` : 'markets closed — opens: '+(s.nextOpens||'').slice(0,40)]) +
+    agentBox('② News + Congress', !!s.newsAgent?.updated, [`${s.newsAgent?.headlines||0} headlines · ${s.newsAgent?.congress||0} congress`, 'upd ' + (s.newsAgent?.updated||'…')]) +
+    agentBox('③ Trader → T212', s.t212?.connected, [s.t212?.connected ? `PRACTICE connected · ${s.t212.mapped} tickers` : 'NOT CONNECTED', s.t212?.cash!=null?`cash ${fmt(s.t212.cash)}`:'', `orders: ${s.t212?.orders||0}`, s.t212?.lastError ? '⚠ '+String(s.t212.lastError).slice(0,70) : '']) +
+    agentBox('④ Logger', !!s.log?.lastXlsx, [s.log?.lastXlsx ? 'xlsx '+s.log.lastXlsx : 'xlsx pending', `csv rows ${s.log?.csvRows||0}`, s.log?.webhook ? `sheet rows ${s.log.sheetRows}` : 'Google Sheet: not set up']) +
+    agentBox('⑤ TradingView', s.tv?.connected, [s.tv?.connected ? 'watching '+(s.tv.symbol||'?') : 'app not running']);
+
+  document.getElementById('c-t212').textContent = s.t212?.cash != null ? fmt(s.t212.cash) : 'not connected';
+  document.getElementById('c-paper').textContent = '$'+fmt(s.paperCash);
+  document.getElementById('c-eq').textContent = '$'+fmt(s.equity);
+  const pl=document.getElementById('c-pnl'); pl.textContent='$'+fmt(s.realized); pl.className='v '+cls(s.realized);
+  document.getElementById('c-oc').textContent = s.openCount + ' / ' + s.closedCount;
+  document.getElementById('c-wr').textContent = s.winRate==null?'—':s.winRate+'%';
+  document.getElementById('c-mo').textContent = s.scan?.openNow || 0;
+  document.getElementById('c-fng').textContent = s.news.fng?.value==null?'—':s.news.fng.value+' '+(s.news.fng.label||'');
+
+  document.getElementById('mkt').innerHTML = s.market.map(m=>{
+    const cpct = Math.round((m.lastConf||0)*100);
+    return `<tr><td>${m.tv?'👁':''}</td><td><b>${m.sym}</b></td>
+      <td>${m.price!=null?px(m.price):'…'}</td>
+      <td class="${cls(m.pct24h||0)}">${m.pct24h!=null?fmt(m.pct24h)+'%':'…'}</td>
+      <td>${m.rsi!=null?m.rsi.toFixed(1):'…'}</td>
+      <td class="${cpct>=22?'green':cpct>0?'yellow':'muted'}"><b>${cpct}%</b></td>
+      <td class="muted">${(m.lastWhy||'…').slice(0,70)}</td>
+      <td class="muted">${m.lastTick||''}</td></tr>`;
+  }).join('') || '<tr><td colspan="8" class="muted">waiting for market data…</td></tr>';
+
+  document.getElementById('pos').innerHTML = s.positions.length ? s.positions.map(p=>
+    `<tr><td><span class="ledger led-${p.ledger}">${p.ledger}</span></td><td><b>${p.sym}</b></td>
+     <td>${fmt(p.invested)}</td><td>${px(p.entry)}</td><td>${px(p.cur)}</td>
+     <td class="${cls(p.upnl)}">${fmt(p.upnl)}</td><td>${Math.round((p.conf||0)*100)}%</td>
+     <td class="muted">${(p.reason||'').slice(0,60)}</td></tr>`).join('')
+    : '<tr><td colspan="8" class="muted">none — bot is waiting for signals in open markets</td></tr>';
+
+  document.getElementById('hist').innerHTML = s.history.length ? s.history.map(h=>
+    `<tr><td class="muted">${h.t}</td><td><span class="ledger led-${h.ledger}">${(h.ledger||'').replace('-PRACTICE','')}</span></td>
+     <td><b>${h.sym}</b></td><td class="sig-${h.action}">${h.action}</td>
+     <td>${px(h.price)}</td><td class="${h.pnl==null?'muted':cls(h.pnl)}">${h.pnl==null?'—':fmt(h.pnl)}</td>
+     <td class="muted">${(h.why||'').slice(0,80)}</td></tr>`).join('')
+    : '<tr><td colspan="7" class="muted">no trades yet</td></tr>';
+
+  document.getElementById('news-upd').textContent = s.news.updated ? '· '+s.news.updated : '';
+  document.getElementById('heads').innerHTML = (s.news.headlines||[]).map(h=>{
+    const b = h.score>0?'b-pos':h.score<0?'b-neg':'b-neu';
+    return `<div class="hitem"><span class="badge ${b}">${h.score>0?'+':''}${h.score}</span>${h.title} <span class="muted">— ${h.source}</span></div>`;
+  }).join('') || '<div class="muted">fetching…</div>';
+
+  document.getElementById('congress').innerHTML = (s.news.congress||[]).map(c=>
+    `<div class="hitem"><span class="badge ${c.type.includes('purchase')?'b-pos':'b-neg'}">${c.type.includes('purchase')?'BUY':'SELL'}</span><b>${c.ticker}</b> — ${c.who} <span class="muted">${c.date||''}</span></div>`
+  ).join('') || '<div class="muted">no disclosures fetched</div>';
+
+  document.getElementById('learn').innerHTML = (s.learn||[]).map(l=>
+    `<tr><td>${l.signal}</td><td class="green">${l.wins}</td><td class="red">${l.losses}</td><td class="${cls(l.pnl)}">${fmt(l.pnl)}</td></tr>`).join('')
+    || '<tr><td colspan="4" class="muted">learns after each closed trade</td></tr>';
+
+  const cv=document.getElementById('spark'), ctx=cv.getContext('2d');
+  ctx.clearRect(0,0,cv.width,cv.height);
+  const pts=s.equityCurve;
+  if(pts && pts.length>1){
+    const vals=pts.map(p=>p.eq), min=Math.min(...vals), max=Math.max(...vals), rng=(max-min)||1;
+    ctx.beginPath();
+    pts.forEach((p,i)=>{ const x=i/(pts.length-1)*cv.width, y=cv.height-6-((p.eq-min)/rng)*(cv.height-12); i?ctx.lineTo(x,y):ctx.moveTo(x,y); });
+    ctx.strokeStyle = vals[vals.length-1]>=vals[0]?'#00ff88':'#ff5566'; ctx.lineWidth=2; ctx.stroke();
+    ctx.fillStyle='#8b949e'; ctx.font='10px monospace';
+    ctx.fillText(fmt(min),4,cv.height-4); ctx.fillText(fmt(max),4,11);
+  }
+}
+function connect(){
+  const es = new EventSource('/events');
+  es.onmessage = e => render(JSON.parse(e.data));
+  es.onerror = () => { document.getElementById('dot').className='dot err'; es.close(); setTimeout(connect,3000); };
+}
+connect();
+</script>
+</body>
+</html>

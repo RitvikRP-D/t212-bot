@@ -1,0 +1,5 @@
+.env
+node_modules/
+bot-data/
+*.xlsx
+.DS_Store

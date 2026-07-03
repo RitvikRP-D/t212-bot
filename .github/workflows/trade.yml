@@ -1,0 +1,62 @@
+name: trade
+# Free 24/7 operation on GitHub-hosted runners (public repo = unlimited minutes).
+# Three chained ~4.5h runs cover London open (08:00 UK) through US close, every weekday.
+# Keys live in GitHub Secrets — never in this repo. Practice account only (demo host hard-coded).
+on:
+  schedule:
+    - cron: '55 6 * * 1-5'   # 06:55 UTC — before London opens (07:00 UTC in summer)
+    - cron: '25 11 * * 1-5'  # 11:25 UTC — takes over as run 1 ends, covers US open
+    - cron: '55 15 * * 1-5'  # 15:55 UTC — runs through US close (~20:00 UTC in summer)
+  workflow_dispatch:
+    inputs:
+      minutes:
+        description: 'How many minutes to run'
+        default: '270'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: trading        # never two bots trading the same account at once
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 320
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # state.json / trades.csv survive between runs via the cache
+      - uses: actions/cache@v4
+        with:
+          path: bot-data
+          key: botstate-${{ github.run_id }}
+          restore-keys: botstate-
+
+      - run: npm ci
+
+      # keep scheduled workflows from being auto-disabled after 60 days of repo inactivity
+      - name: keepalive (Mondays)
+        if: github.event_name == 'schedule'
+        continue-on-error: true
+        run: |
+          if [ "$(date -u +%u)" = "1" ] && [ "$(date -u +%H)" -lt 10 ]; then
+            git config user.name t212-bot
+            git config user.email t212-bot@users.noreply.github.com
+            git commit --allow-empty -m "keepalive"
+            git push
+          fi
+
+      - name: run trading agents
+        run: node server.js
+        env:
+          T212_API_KEY_ID: ${{ secrets.T212_API_KEY_ID }}
+          T212_API_SECRET: ${{ secrets.T212_API_SECRET }}
+          GSHEET_WEBHOOK: ${{ secrets.GSHEET_WEBHOOK }}
+          MAX_RUN_MINUTES: ${{ github.event.inputs.minutes || '270' }}
+          XLSX_OUT: bot-data/t212_trading_log.xlsx
