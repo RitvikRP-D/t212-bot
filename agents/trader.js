@@ -108,6 +108,7 @@ function start(bus) {
     } catch (e) {}
   }
   setInterval(sweepStuckOrders, 4 * 60e3);
+  setTimeout(sweepStuckOrders, 60e3); // first sweep fast — clean up any mess from a previous run
 
   function learnKey(sig, sym) { return sig + ':' + sym; }
   function learnMul(sig, sym) {

@@ -19,6 +19,11 @@ function start(bus) {
 
   function equityNow() {
     if (!bus.t212Status || !bus.t212Status.connected) return null;
+    // T212's own "total" is authoritative — it includes free cash, cash blocked by
+    // pending orders, and invested value. Free-cash+positions math gets poisoned
+    // the moment an order queues (learned that twice today).
+    if (bus.t212Status.total != null && isFinite(bus.t212Status.total) && bus.t212Status.total > 0)
+      return bus.t212Status.total;
     let open = 0;
     for (const [s, p] of Object.entries(state.t212.positions)) {
       const px = bus.market[s]?.price;

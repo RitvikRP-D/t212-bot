@@ -43,8 +43,11 @@ function start(bus) {
     bus.medicStatus.lastCheck = new Date().toLocaleTimeString();
     bus.medicStatus.watching = WATCH.length;
     const mem = process.memoryUsage().rss / 1048576;
+    const heap = process.memoryUsage().heapUsed / 1048576;
     bus.medicStatus.memMB = Math.round(mem);
-    if (mem > 1400) { incident(`memory ${Math.round(mem)}MB — saving state and restarting fleet`); return die(); }
+    bus.medicStatus.heapMB = Math.round(heap);
+    // heapUsed is the real leak signal; RSS runs high on macOS from fetch buffers
+    if (heap > 1500 || mem > 3000) { incident(`memory rss=${Math.round(mem)}MB heap=${Math.round(heap)}MB — saving state and restarting fleet`); return die(); }
     let stalled = 0;
     for (const w of WATCH) {
       let v; try { v = w.val(); } catch (e) { v = null; }

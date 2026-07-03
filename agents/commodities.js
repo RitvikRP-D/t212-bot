@@ -40,11 +40,14 @@ function start(bus) {
   bus.commodStatus = { scanned: 0, errors: 0, targets: TARGETS.length, mapped: 0, lastSym: null, topConf: null };
   let idx = 0;
 
+  // only real ETC/ETP issuers — a company with "Coffee" in its name is NOT the commodity
+  const ISSUER_RE = /wisdomtree|ishares|invesco|xtrackers|amundi|vaneck|hanetf|global x|l&g|etfs |\betc\b|\betp\b|physical/i;
   function mapETCs() {
     let mapped = 0;
     for (const t of TARGETS) {
-      const hit = bus.universe.find(u => u.t212 && t.re.test(u.name) && !/short|-1x|3x|2x|inverse|leveraged/i.test(u.name));
+      const hit = bus.universe.find(u => u.t212 && t.re.test(u.name) && ISSUER_RE.test(u.name) && !/short|-1x|3x|2x|inverse|leveraged/i.test(u.name));
       if (hit) { (bus.commod[t.key] = bus.commod[t.key] || {}).etp = hit.y; (bus.commod[t.key]).etpName = hit.name; mapped++; }
+      else if (bus.commod[t.key]) { delete bus.commod[t.key].etp; delete bus.commod[t.key].etpName; }
     }
     bus.commodStatus.mapped = mapped;
   }
