@@ -60,9 +60,12 @@
   <h2>Equity</h2>
   <canvas id="spark" width="1200" height="70"></canvas>
 
+  <h2>TradingView Chart <span class="muted">(tap any signal row to load its graph)</span></h2>
+  <iframe id="tvchart" style="width:100%;height:380px;border:1px solid #1f2733;border-radius:8px;background:#11161f;" frameborder="0" allowtransparency="true"></iframe>
+
   <h2>Top Signals <span class="muted">(bot confidence across whole universe)</span></h2>
   <div class="wrap"><table>
-    <thead><tr><th></th><th>Symbol</th><th>Price</th><th>24h</th><th>RSI</th><th>Conf</th><th>Bot's read</th><th>At</th></tr></thead>
+    <thead><tr><th></th><th>Symbol</th><th>Price</th><th>24h</th><th>RSI</th><th>TradingView</th><th>Conf</th><th>Bot's read</th><th>At</th></tr></thead>
     <tbody id="mkt"></tbody>
   </table></div>
 
@@ -109,7 +112,8 @@ function render(s){
     agentBox('② News + Congress', !!s.newsAgent?.updated, [`${s.newsAgent?.headlines||0} headlines · ${s.newsAgent?.congress||0} congress`, 'upd ' + (s.newsAgent?.updated||'…')]) +
     agentBox('③ Trader → T212', s.t212?.connected, [s.t212?.connected ? `PRACTICE connected · ${s.t212.mapped} tickers` : 'NOT CONNECTED', s.t212?.cash!=null?`cash ${fmt(s.t212.cash)}`:'', `orders: ${s.t212?.orders||0}`, s.t212?.lastError ? '⚠ '+String(s.t212.lastError).slice(0,70) : '']) +
     agentBox('④ Logger', !!s.log?.lastXlsx, [s.log?.lastXlsx ? 'xlsx '+s.log.lastXlsx : 'xlsx pending', `csv rows ${s.log?.csvRows||0}`, s.log?.webhook ? `sheet rows ${s.log.sheetRows}` : 'Google Sheet: not set up']) +
-    agentBox('⑤ TradingView', s.tv?.connected, [s.tv?.connected ? 'watching '+(s.tv.symbol||'?') : 'app not running']);
+    agentBox('⑤ TV Bridge', s.tv?.connected, [s.tv?.connected ? 'watching '+(s.tv.symbol||'?') : 'TV app not running (local only)']) +
+    agentBox('⑥ TV Analyst', (s.tva?.rated||0) > 0, [`${s.tva?.rated||0} live TradingView ratings`, s.tva?.lastMarket ? 'last: '+s.tva.lastMarket : 'starting…', 'upd ' + (s.tva?.updated||'…') + (s.tva?.errors ? ` · err ${s.tva.errors}` : '')]);
 
   document.getElementById('c-t212').textContent = s.t212?.cash != null ? fmt(s.t212.cash) : 'not connected';
   document.getElementById('c-paper').textContent = '$'+fmt(s.paperCash);
@@ -122,14 +126,17 @@ function render(s){
 
   document.getElementById('mkt').innerHTML = s.market.map(m=>{
     const cpct = Math.round((m.lastConf||0)*100);
-    return `<tr><td>${m.tv?'👁':''}</td><td><b>${m.sym}</b></td>
+    const tvCls = !m.tvLabel?'muted':m.tvRec>=0.1?'green':m.tvRec<=-0.1?'red':'yellow';
+    return `<tr onclick="loadChart('${(m.tvName||m.sym).replace(/'/g,'')}')" style="cursor:pointer;"><td>${m.tv?'👁':''}</td><td><b>${m.sym}</b></td>
       <td>${m.price!=null?px(m.price):'…'}</td>
       <td class="${cls(m.pct24h||0)}">${m.pct24h!=null?fmt(m.pct24h)+'%':'…'}</td>
       <td>${m.rsi!=null?m.rsi.toFixed(1):'…'}</td>
+      <td class="${tvCls}"><b>${m.tvLabel||'—'}</b></td>
       <td class="${cpct>=22?'green':cpct>0?'yellow':'muted'}"><b>${cpct}%</b></td>
       <td class="muted">${(m.lastWhy||'…').slice(0,70)}</td>
       <td class="muted">${m.lastTick||''}</td></tr>`;
-  }).join('') || '<tr><td colspan="8" class="muted">waiting for market data…</td></tr>';
+  }).join('') || '<tr><td colspan="9" class="muted">waiting for market data…</td></tr>';
+  if (!chartLoaded && s.market.length) loadChart((s.market.find(m=>m.tvName)||s.market[0]).tvName || s.market[0].sym);
 
   document.getElementById('pos').innerHTML = s.positions.length ? s.positions.map(p=>
     `<tr><td><span class="ledger led-${p.ledger}">${p.ledger}</span></td><td><b>${p.sym}</b></td>
@@ -170,6 +177,13 @@ function render(s){
     ctx.fillStyle='#8b949e'; ctx.font='10px monospace';
     ctx.fillText(fmt(min),4,cv.height-4); ctx.fillText(fmt(max),4,11);
   }
+}
+let chartLoaded = false;
+function loadChart(symbol){
+  if (!symbol) return;
+  chartLoaded = true;
+  document.getElementById('tvchart').src = 'https://s.tradingview.com/widgetembed/?symbol=' + encodeURIComponent(symbol)
+    + '&interval=5&theme=dark&style=1&locale=en&hidetoptoolbar=1&hidelegend=0&saveimage=0&withdateranges=1';
 }
 function connect(){
   const es = new EventSource('/events');

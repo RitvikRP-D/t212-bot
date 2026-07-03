@@ -50,6 +50,7 @@ if (maxMin > 0) setTimeout(() => {
 
 require('./agents/news').start(bus);
 require('./agents/stocks').start(bus);
+require('./agents/tvanalyst').start(bus);
 require('./agents/trader').start(bus);
 require('./agents/logger').start(bus);
 require('./agents/tradingview').start(bus);
@@ -72,10 +73,14 @@ function snapshot() {
   const wins = closed.filter(h => h.pnl > 0).length;
   const top = Object.entries(bus.market).filter(([, m]) => m.price != null)
     .sort((a, b) => (b[1].lastConf || 0) - (a[1].lastConf || 0)).slice(0, 30)
-    .map(([sym, m]) => ({ sym, price: m.price, pct24h: m.pct24h, rsi: m.rsi, lastConf: m.lastConf || 0, lastWhy: m.lastWhy || '…', lastTick: m.lastTick, tv: !!m.tvWatching }));
+    .map(([sym, m]) => {
+      const tvr = bus.tvRatings && bus.tvRatings[sym];
+      return { sym, price: m.price, pct24h: m.pct24h, rsi: m.rsi, lastConf: m.lastConf || 0, lastWhy: m.lastWhy || '…', lastTick: m.lastTick, tv: !!m.tvWatching,
+        tvLabel: tvr ? tvr.label : null, tvRec: tvr ? +tvr.rec.toFixed(2) : null, tvName: tvr ? tvr.tvName : null };
+    });
   return {
     time: new Date().toLocaleTimeString(), pause: state.pause,
-    t212: bus.t212Status, scan: bus.scanStatus, log: bus.logStatus, tv: bus.tvStatus,
+    t212: bus.t212Status, scan: bus.scanStatus, log: bus.logStatus, tv: bus.tvStatus, tva: bus.tvaStatus,
     newsAgent: { updated: bus.news.updated, headlines: (bus.news.headlines || []).length, congress: (bus.news.congress || []).length },
     paperCash: +state.paper.balance.toFixed(2),
     realized: +state.realized.toFixed(2),

@@ -16,6 +16,8 @@ const HOURS = {
   PA: { tz: 'Europe/Paris',     open: [9,0],  close: [17,30] },
   AS: { tz: 'Europe/Amsterdam', open: [9,0],  close: [17,30] },
   SW: { tz: 'Europe/Zurich',    open: [9,0],  close: [17,30] },
+  MI: { tz: 'Europe/Rome',      open: [9,0],  close: [17,30] },
+  MC: { tz: 'Europe/Madrid',    open: [9,0],  close: [17,30] },
 };
 function venue(sym){ const p = sym.split('.'); return p.length > 1 ? p[1] : 'US'; }
 function marketOpen(sym){
@@ -40,6 +42,7 @@ module.exports = {
   SCAN_MS: 350,            // one Yahoo fetch per 350ms, rotating open-market symbols
   HOT_EVERY: 3,            // every 3rd scan slot goes to the hot list (holdings + high-confidence)
   TRADER_TICK_MS: 2500,
+  TV_MS: 25000,            // TradingView analyst: one market scanned per 25s, 8 markets rotating
   LOGGER_MS: 60000,
   NEWS_MS: 90000,
   CONGRESS_MS: 6 * 3600e3,

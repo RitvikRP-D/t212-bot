@@ -47,7 +47,7 @@ function start(bus) {
     bus.scanStatus.fullPassMins = +((open.length * SCAN_MS) / 60000).toFixed(1);
     slot++;
     const holdings = Object.keys(bus.state.paper.positions).concat(Object.keys(bus.state.t212.positions));
-    const hot = [...new Set([...holdings, ...open.filter(s => (bus.market[s]?.lastConf || 0) >= 0.15)])].filter(marketOpen);
+    const hot = [...new Set([...holdings, ...(bus.tvHot || []), ...open.filter(s => (bus.market[s]?.lastConf || 0) >= 0.15)])].filter(marketOpen);
     if (slot % HOT_EVERY === 0 && hot.length) fetchSym(hot[hotIdx++ % hot.length]);
     else fetchSym(open[fullIdx++ % open.length]);
   }, SCAN_MS);

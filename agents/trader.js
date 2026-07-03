@@ -102,9 +102,15 @@ function start(bus) {
     const ev = evaluate(mk, senti, bus.news.fng ? bus.news.fng.value : null, 1);
     if (!ev) { mk.lastConf = 0; mk.lastWhy = mk.rsi != null ? `no buy setup — RSI ${mk.rsi.toFixed(1)}${mk.rsi > 68 ? ' overbought' : ''}` : 'warming up'; return; }
     const lm = learnMul(ev.sigType, sym);
-    const conf = Math.max(0, Math.min(1, ev.conf * lm));
+    let conf = Math.max(0, Math.min(1, ev.conf * lm));
+    let tvNote = '';
+    const tvr = bus.tvRatings && bus.tvRatings[sym];
+    if (tvr && Date.now() - tvr.at < 30 * 60e3) {
+      conf = Math.max(0, Math.min(1, conf + tvr.rec * 0.15));
+      tvNote = ` · TradingView says ${tvr.label} (${tvr.rec.toFixed(2)})`;
+    }
     mk.lastConf = +conf.toFixed(2);
-    mk.lastWhy = ev.reasons.join(' · ') + (lm !== 1 ? ` · learning ×${lm.toFixed(2)}` : '');
+    mk.lastWhy = ev.reasons.join(' · ') + (lm !== 1 ? ` · learning ×${lm.toFixed(2)}` : '') + tvNote;
     if (state.pause || conf < 0.22 || !marketOpen(sym) || openCount() >= MAX_OPEN) return;
 
     if (t212.connected() && t212Ticker[sym]) {
@@ -160,6 +166,11 @@ function start(bus) {
       if (gain <= stop) why = stop > 0 ? `${mode}: locked +${(gain*100).toFixed(2)}% (peak +${(peakGain*100).toFixed(2)}%)` : `${mode} at ${(gain*100).toFixed(2)}%`;
       else if (mk.rsi != null && mk.rsi > 70 && mk.crossDown && gain > 0) why = `overbought RSI ${mk.rsi.toFixed(1)} — taking +${(gain*100).toFixed(2)}%`;
       else if (ns <= -1.5 && gain > -0.02) why = `bad news flow (${ns}) — exiting at ${(gain*100).toFixed(2)}%`;
+      else {
+        const tvx = bus.tvRatings && bus.tvRatings[sym];
+        if (tvx && Date.now() - tvx.at < 30 * 60e3 && tvx.rec <= -0.5 && gain > 0.005)
+          why = `TradingView flipped to STRONG SELL (${tvx.rec.toFixed(2)}) — locking +${(gain*100).toFixed(2)}%`;
+      }
       if (why) closePos(sym, ledger, book, p, mk, why);
     }
   }
