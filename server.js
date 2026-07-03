@@ -37,6 +37,7 @@ const bus = {
   onTick: null, onTrade: null,
 };
 setInterval(() => { if (dirty) { try { fs.writeFileSync(STATE_FILE, JSON.stringify(state)); } catch (e) {} dirty = false; } }, 5000);
+bus.saveNow = () => { try { fs.writeFileSync(STATE_FILE, JSON.stringify(state)); dirty = false; } catch (e) {} };
 for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { try { fs.writeFileSync(STATE_FILE, JSON.stringify(state)); } catch (e) {} process.exit(0); });
 
 // Cloud mode: GitHub Actions jobs must end before the 6h hard limit, so exit
@@ -48,12 +49,24 @@ if (maxMin > 0) setTimeout(() => {
   process.exit(0);
 }, maxMin * 60000);
 
-require('./agents/news').start(bus);
-require('./agents/stocks').start(bus);
-require('./agents/tvanalyst').start(bus);
-require('./agents/trader').start(bus);
-require('./agents/logger').start(bus);
-require('./agents/tradingview').start(bus);
+// ——— SYSTEM X2 fleet ———
+require('./agents/risk').start(bus);        // ⑦ risk guardian (10% hard floor) — first, so gates exist
+require('./agents/news').start(bus);        // ② market news + congress
+require('./agents/livenews').start(bus);    // ⑬ FT/Guardian/Economist/BBC + Bloomberg/CNBC video desks
+require('./agents/stocks').start(bus);      // ① 1-min scanner, 16k universe
+require('./agents/crypto').start(bus);      // ⑩ crypto 24/7 (Binance + crypto news + ETP mapping)
+require('./agents/commodities').start(bus); // ⑫ gold/silver/oil/copper… 24 targets via ~23h futures
+require('./agents/tvanalyst').start(bus);   // ⑥ TradingView stocks analyst (8 markets)
+require('./agents/cryptotv').start(bus);    // ⑪ TradingView crypto analyst (multi-timeframe, ~10.5k metrics)
+require('./agents/history').start(bus);     // ⑭ historian — monthly data back to 1927
+require('./agents/ranker').start(bus);      // ⑮ whole-universe leaderboard
+require('./agents/marketmap').start(bus);   // ⑯ venue air-traffic control
+require('./agents/trader').start(bus);      // ③ the trader (T212 practice orders)
+require('./agents/allocator').start(bus);   // ⑰ overnight order queue → fires at the bell
+require('./agents/sentinel').start(bus);    // ⑨ constant checker / auto-repair
+require('./agents/medic').start(bus);       // ⑧ self-healer / fleet supervisor
+require('./agents/logger').start(bus);      // ④ xlsx + csv + Google Sheet
+require('./agents/tradingview').start(bus); // ⑤ optional local TradingView-app bridge
 
 function lanIP() {
   for (const ifs of Object.values(os.networkInterfaces()))
@@ -68,7 +81,7 @@ function snapshot() {
       positions.push({ ledger, sym, entry: p.entry, cur, qty: p.qty, invested: p.invested,
         upnl: +((cur - p.entry) * p.qty).toFixed(2), opened: p.opened, conf: p.conf, reason: p.reason });
     }
-  let openVal = 0; for (const p of positions) openVal += p.cur * p.qty;
+  let openVal = 0; for (const p of positions) if (p.ledger === 'T212-PRACTICE') openVal += p.cur * p.qty;
   const closed = state.history.filter(h => h.pnl != null);
   const wins = closed.filter(h => h.pnl > 0).length;
   const top = Object.entries(bus.market).filter(([, m]) => m.price != null)
@@ -78,13 +91,25 @@ function snapshot() {
       return { sym, price: m.price, pct24h: m.pct24h, rsi: m.rsi, lastConf: m.lastConf || 0, lastWhy: m.lastWhy || '…', lastTick: m.lastTick, tv: !!m.tvWatching,
         tvLabel: tvr ? tvr.label : null, tvRec: tvr ? +tvr.rec.toFixed(2) : null, tvName: tvr ? tvr.tvName : null };
     });
+  const cryptoTop = Object.entries(bus.crypto || {}).filter(([, v]) => v.price)
+    .sort((a, b) => (b[1].conf || 0) - (a[1].conf || 0)).slice(0, 12)
+    .map(([coin, v]) => ({ coin, price: v.price, pct24h: v.pct24h, rsi: v.rsi, conf: v.conf || 0, why: v.why, etp: v.etp || null }));
+  const commodTop = Object.entries(bus.commod || {}).filter(([, v]) => v.price)
+    .sort((a, b) => (b[1].conf || 0) - (a[1].conf || 0)).slice(0, 12)
+    .map(([key, v]) => ({ key, price: v.price, pct24h: v.pct24h, rsi: v.rsi, conf: v.conf || 0, etp: v.etp || null, etpName: v.etpName || null }));
   return {
     time: new Date().toLocaleTimeString(), pause: state.pause,
     t212: bus.t212Status, scan: bus.scanStatus, log: bus.logStatus, tv: bus.tvStatus, tva: bus.tvaStatus,
+    risk: bus.riskStatus, medic: bus.medicStatus, sentinel: bus.sentinelStatus,
+    crypto: { status: bus.cryptoStatus, top: cryptoTop, news: { global: (bus.cryptoNews || {}).global, updated: (bus.cryptoNews || {}).updated, headlines: ((bus.cryptoNews || {}).headlines || []).slice(0, 5) } },
+    cryptoTV: bus.ctvStatus, commodities: { status: bus.commodStatus, top: commodTop },
+    deepNews: { global: (bus.deepNews || {}).global, perTopic: (bus.deepNews || {}).perTopic, sources: (bus.deepNews || {}).sources, updated: (bus.deepNews || {}).updated, headlines: ((bus.deepNews || {}).headlines || []).slice(0, 6) },
+    historian: bus.histStatus, ranker: bus.rankStatus, marketMap: bus.marketMap, alloc: bus.allocStatus,
+    queue: Object.entries(state.queue || {}).map(([sym, q]) => ({ sym, ...q })),
     newsAgent: { updated: bus.news.updated, headlines: (bus.news.headlines || []).length, congress: (bus.news.congress || []).length },
     paperCash: +state.paper.balance.toFixed(2),
     realized: +state.realized.toFixed(2),
-    equity: +(state.paper.balance + (bus.t212Status?.cash || 0) + openVal).toFixed(2),
+    equity: bus.t212Status?.connected ? +((bus.t212Status?.cash || 0) + openVal).toFixed(2) : +(state.paper.balance).toFixed(2),
     openCount: positions.length, closedCount: closed.length,
     winRate: closed.length ? Math.round(wins / closed.length * 100) : null,
     universe: bus.universe.length,

@@ -41,6 +41,11 @@ function start(bus) {
       const m = calcMACD(mk.closes);
       if (m) { mk.macdHist = m.hist; mk.crossUp = m.crossUp; mk.crossDown = m.crossDown; }
       mk.lastTick = new Date().toLocaleTimeString();
+      mk.lastTickAt = Date.now();
+      // timestamp of the newest 1-min bar — if it's hours old while the clock says
+      // "open", the venue is on holiday/halted and orders would just queue+block cash
+      const ts = res.timestamp;
+      mk.lastBarAt = ts && ts.length ? ts[ts.length - 1] * 1000 : null;
       bus.scanStatus.scanned++;
       bus.scanStatus.lastSym = sym;
       if (bus.onTick) bus.onTick(sym);

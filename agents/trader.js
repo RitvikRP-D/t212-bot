@@ -11,7 +11,7 @@ function now() { return new Date().toLocaleTimeString(); }
 
 function start(bus) {
   const state = bus.state;
-  bus.t212Status = { connected: false, scheme: null, cash: null, mapped: 0, lastError: 'connecting…', orders: 0, lastAttempt: null };
+  bus.t212Status = { connected: false, scheme: null, cash: null, total: null, mapped: 0, lastError: 'connecting…', orders: 0, lastAttempt: null };
   const t212Ticker = {}; // yahoo sym -> t212 ticker
 
   async function tryConnect() {
@@ -26,8 +26,16 @@ function start(bus) {
     console.log('[t212] CONNECTED to PRACTICE account via ' + res.scheme);
     try {
       const c = await t212.cash();
-      if (c.status === 200) bus.t212Status.cash = c.body.free != null ? c.body.free : c.body.total;
+      if (c.status === 200) {
+        bus.t212Status.cash = c.body.free != null ? c.body.free : c.body.total;
+        bus.t212Status.total = c.body.total;
+      }
     } catch (e) {}
+    await expandUniverse();
+    reconcile();
+  }
+  async function expandUniverse() {
+    if (bus.universe.length > 1000) return; // already expanded
     try {
       const inst = await t212.instruments();
       if (inst.status === 200 && Array.isArray(inst.body)) {
@@ -38,18 +46,23 @@ function start(bus) {
           console.log(`[t212] universe expanded to ${universe.length} instruments from your practice account (${skipped} unmappable skipped)`);
         }
         bus.t212Status.mapped = Object.keys(t212Ticker).length;
+      } else {
+        console.log('[t212] instruments fetch HTTP ' + inst.status + ' — will retry');
       }
-    } catch (e) {}
-    reconcile();
+    } catch (e) { console.log('[t212] instruments fetch failed — will retry: ' + e.message); }
   }
   tryConnect();
   setInterval(() => { if (!t212.connected()) tryConnect(); }, AUTH_RETRY_MS);
+  setInterval(() => { if (t212.connected()) expandUniverse(); }, 3 * 60e3); // keep retrying until the 16k universe lands
 
   async function reconcile() {
     if (!t212.connected()) return;
     try {
       const c = await t212.cash();
-      if (c.status === 200) bus.t212Status.cash = c.body.free != null ? c.body.free : c.body.total;
+      if (c.status === 200) {
+        bus.t212Status.cash = c.body.free != null ? c.body.free : c.body.total;
+        bus.t212Status.total = c.body.total;
+      }
       const p = await t212.portfolio();
       if (p.status === 200 && Array.isArray(p.body)) {
         const seen = new Set();
@@ -74,6 +87,27 @@ function start(bus) {
     } catch (e) {}
   }
   setInterval(reconcile, 60000);
+
+  // ORDER JANITOR: any order still unfilled after 3 min is stuck (holiday, halt,
+  // illiquid book) — cancel it so it can't sit there blocking capital.
+  async function sweepStuckOrders() {
+    if (!t212.connected()) return;
+    try {
+      const r = await t212.orders();
+      if (r.status !== 200 || !Array.isArray(r.body)) return;
+      for (const o of r.body) {
+        const ageMin = (Date.now() - new Date(o.createdAt).getTime()) / 60000;
+        if (ageMin < 3 || (o.filledQuantity || 0) > 0) continue;
+        const c = await t212.cancelOrder(o.id);
+        if (c.status === 200) {
+          console.log(`[janitor] cancelled stuck order ${o.id} ${o.ticker} (${ageMin.toFixed(0)}min unfilled)`);
+          for (const [sym, p] of Object.entries(state.t212.positions))
+            if (p.t212Ticker === o.ticker) { delete state.t212.positions[sym]; bus.markDirty(); }
+        }
+      }
+    } catch (e) {}
+  }
+  setInterval(sweepStuckOrders, 4 * 60e3);
 
   function learnKey(sig, sym) { return sig + ':' + sym; }
   function learnMul(sig, sym) {
@@ -107,28 +141,59 @@ function start(bus) {
     const tvr = bus.tvRatings && bus.tvRatings[sym];
     if (tvr && Date.now() - tvr.at < 30 * 60e3) {
       conf = Math.max(0, Math.min(1, conf + tvr.rec * 0.15));
-      tvNote = ` · TradingView[122 metrics] says ${tvr.label} (${tvr.rec.toFixed(2)})${tvr.detail ? ': ' + tvr.detail : ''}`;
+      tvNote = ` · TradingView says ${tvr.label} (${tvr.rec.toFixed(2)})${tvr.detail ? ': ' + tvr.detail : ''}`;
+    }
+    // SYSTEM X2 fleet inputs —
+    // historian: never fight a century of trend
+    const lt = bus.longTerm && bus.longTerm[sym];
+    if (lt && Date.now() - lt.at < 25 * 3600e3) {
+      conf = Math.max(0, Math.min(1, conf + (lt.regime > 0 ? 0.05 : -0.10)));
+      tvNote += ` · ${lt.note}`;
+    }
+    // universe ranker: leaderboard names earn a bonus
+    if (bus.rankTop && bus.rankTop.has(sym)) { conf = Math.min(1, conf + 0.05); tvNote += ' · top-150 universe rank'; }
+    // allocator: conviction queued overnight fires with its stored confidence
+    if (mk.queuedBoost && Date.now() < mk.queuedBoost.until) {
+      conf = Math.max(conf, mk.queuedBoost.conf);
+      tvNote += ' · ' + mk.queuedBoost.reason;
     }
     mk.lastConf = +conf.toFixed(2);
     mk.lastWhy = ev.reasons.join(' · ') + (lm !== 1 ? ` · learning ×${lm.toFixed(2)}` : '') + tvNote;
-    if (state.pause || conf < 0.22 || !marketOpen(sym) || openCount() >= MAX_OPEN) return;
+    if (state.pause || conf < 0.55 || !marketOpen(sym) || openCount() >= MAX_OPEN) return;
+    if (bus.riskGate && !bus.riskGate.canEnter()) return; // RISK GUARDIAN gate
+    // HOLIDAY/HALT GUARD: the clock can say "open" on an exchange holiday (learned
+    // this on July 4th weekend — 26 orders queued and blocked £9,996 of cash).
+    // Only enter when the newest 1-min bar is genuinely fresh.
+    if (!mk.lastBarAt || Date.now() - mk.lastBarAt > 20 * 60e3) {
+      mk.lastWhy = (mk.lastWhy || '') + ' · ⏸ venue prints stale (holiday/halt?) — not risking a blocked order';
+      return;
+    }
 
     if (t212.connected() && t212Ticker[sym]) {
       if (state.t212.positions[sym]) return;
       const cash = bus.t212Status.cash || 0;
-      const frac = Math.min(0.6, 0.05 + conf * 0.55); // cap 60% of cash per position
-      const invest = Math.min(cash * frac, cash - 1);
+      const frac = Math.min(0.90, 0.20 + conf * 0.70); // scales with confidence, up to 90%
+      let invest = Math.min(cash * frac, cash - 50);
+      if (bus.riskGate) invest = bus.riskGate.capInvest(invest); // never > 90% of total equity
       if (invest < T212_MIN_ORDER) return;
       const qty = +(invest / mk.price).toFixed(4);
       if (qty <= 0) return;
       state.t212.positions[sym] = { t212Ticker: t212Ticker[sym], entry: mk.price, qty, invested: invest, opened: now(), peak: mk.price, conf, sigType: ev.sigType, reason: mk.lastWhy, pendingFill: true };
-      const r = await t212.marketOrder(t212Ticker[sym], qty);
+      // T212 instruments differ in allowed quantity precision — retry coarser on 400
+      let r = await t212.marketOrder(t212Ticker[sym], qty);
+      for (const dp of [2, 1, 0]) {
+        if (r.status !== 400 || !/precision/i.test(JSON.stringify(r.body))) break;
+        const q2 = +(invest / mk.price).toFixed(dp);
+        if (q2 <= 0) break;
+        state.t212.positions[sym].qty = q2;
+        r = await t212.marketOrder(t212Ticker[sym], q2);
+      }
       if (r.status === 200) {
         state.t212.positions[sym].pendingFill = false;
         bus.t212Status.orders++;
         bus.t212Status.cash = Math.max(0, cash - invest);
-        pushHist({ t: now(), sym, ledger: 'T212-PRACTICE', action: 'BUY', price: mk.price, qty, pnl: null, why: `${mk.lastWhy} — conf ${(conf*100).toFixed(0)}%, ~${invest.toFixed(2)} → REAL order on practice account (check your T212 app)` });
-        console.log(`[trade] T212 BUY ${t212Ticker[sym]} qty=${qty}`);
+        pushHist({ t: now(), sym, ledger: 'T212-PRACTICE', action: 'BUY', price: mk.price, qty: state.t212.positions[sym].qty, pnl: null, why: `${mk.lastWhy} — conf ${(conf*100).toFixed(0)}%, ~${invest.toFixed(2)} → REAL order on practice account (check your T212 app)` });
+        console.log(`[trade] T212 BUY ${t212Ticker[sym]} qty=${state.t212.positions[sym].qty}`);
       } else {
         delete state.t212.positions[sym];
         bus.t212Status.lastError = `order rejected HTTP ${r.status}: ${JSON.stringify(r.body).slice(0, 140)}`;
@@ -158,8 +223,8 @@ function start(bus) {
       const gain = (mk.price - p.entry) / p.entry;
       const peakGain = (p.peak - p.entry) / p.entry;
       const ns = sentiFor(sym);
-      let stop = -0.03, mode = 'stop loss';
-      if (mk.atrPct != null && mk.atrPct > 0.0009) { stop = -Math.min(0.055, Math.max(0.02, mk.atrPct * 35)); mode = 'ATR-sized stop'; }
+      let stop = -0.018, mode = 'stop loss (tight on big bets)';
+      if (mk.atrPct != null && mk.atrPct > 0.0009) { stop = -Math.min(0.04, Math.max(0.012, mk.atrPct * 22)); mode = 'ATR-sized stop'; }
       if (ns >= 0.5 && (mk.rsi == null || mk.rsi < 50)) { stop = -0.06; mode = 'wide stop (positive news, riding dip)'; }
       if (peakGain > 0.02) { stop = peakGain - 0.015; mode = 'trailing stop'; }
       if (stop < -0.08) stop = -0.08;
@@ -194,6 +259,19 @@ function start(bus) {
     bus.markDirty();
   }
   bus.onTick = exitCheck;
+  bus.tryEnter = tryEnter;   // allocator fires queued conviction through here at the bell
+  // RISK GUARDIAN authority: close everything at market, immediately
+  bus.liquidateAll = async (reason) => {
+    console.log('[trader] LIQUIDATE ALL — ' + reason);
+    for (const [sym, p] of Object.entries({ ...state.t212.positions })) {
+      const mk = bus.market[sym] || { price: p.entry };
+      await closePos(sym, 'T212-PRACTICE', state.t212.positions, p, mk, 'LIQUIDATED: ' + reason);
+    }
+    for (const [sym, p] of Object.entries({ ...state.paper.positions })) {
+      const mk = bus.market[sym] || { price: p.entry };
+      closePos(sym, 'VIRTUAL', state.paper.positions, p, mk, 'LIQUIDATED: ' + reason);
+    }
+  };
 
   setInterval(() => {
     for (const [sym, mk] of Object.entries(bus.market)) {

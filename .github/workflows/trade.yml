@@ -4,9 +4,12 @@ name: trade
 # Keys live in GitHub Secrets — never in this repo. Practice account only (demo host hard-coded).
 on:
   schedule:
-    - cron: '55 6 * * 1-5'   # 06:55 UTC — before London opens (07:00 UTC in summer)
-    - cron: '25 11 * * 1-5'  # 11:25 UTC — takes over as run 1 ends, covers US open
-    - cron: '55 15 * * 1-5'  # 15:55 UTC — runs through US close (~20:00 UTC in summer)
+    - cron: '55 6 * * *'   # 06:55 UTC — before London opens (stock fleet + everything)
+    - cron: '25 11 * * *'  # 11:25 UTC — covers US open
+    - cron: '55 15 * * *'  # 15:55 UTC — through US close
+    - cron: '25 20 * * *'  # 20:25 UTC — evening: crypto/commodities/ranker grind
+    - cron: '55 0 * * *'   # 00:55 UTC — overnight: crypto + Asia news, queue conviction
+    - cron: '25 5 * * *'   # 05:25 UTC — pre-dawn: conviction ready for the London bell
   workflow_dispatch:
     inputs:
       minutes:

@@ -47,8 +47,28 @@ module.exports = {
   NEWS_MS: 90000,
   CONGRESS_MS: 6 * 3600e3,
   AUTH_RETRY_MS: 10 * 60e3, // retry T212 connect every 10 min until it works
-  MAX_OPEN: 25,            // max simultaneous positions
+  MAX_OPEN: 10,            // max simultaneous positions (very high conviction only)
   T212_MIN_ORDER: 1.5,
   T212_SPACING_MS: 2600,
   PAPER_START: 10000,      // internal virtual ledger used until T212 connects
+
+  // ——— SYSTEM X2 ———
+  // RISK GUARDIAN — percentage-based so it protects a £10,000 practice account and
+  // a £100 real account identically (£100 → hard halt the moment equity < £90).
+  RISK: {
+    MAX_DRAWDOWN: 0.10,    // total loss floor: equity < 90% of baseline → HALT + LIQUIDATE
+    DAILY_MAX_LOSS: 0.06,  // one bad day: -6% from day start → pause entries until tomorrow
+    PER_TRADE_CAP: 0.90,   // one position may never exceed 90% of equity
+  },
+  CRYPTO_MS: 1600,         // Binance spot klines: one coin per 1.6s, 24/7
+  CRYPTOTV_MS: 30000,      // TradingView crypto screener sweep (multi-timeframe)
+  COMMOD_MS: 4000,         // commodity futures via Yahoo (Globex trades ~23h Sun-Fri)
+  LIVENEWS_MS: 180000,     // FT/Guardian/Economist/BBC/YouTube deep news
+  HISTORY_MS: 6000,        // long-horizon analyst: one symbol per 6s, monthly data to 1927
+  RANKER_MS: 4200,         // whole-universe ranker: slow background pass, weekly candles
+  ALLOC_MS: 5000,          // order queue: fire queued conviction at the venue's open bell
+  SENTINEL_MS: 45000,      // constant checker: state integrity + API health + sanity
+  MEDIC_MS: 30000,         // self-healer: heartbeats, stall detection, auto-restart
+  MARKETMAP_MS: 30000,
+  QUEUE_MIN_CONF: 0.55,    // minimum conviction to queue an order for next open
 };
