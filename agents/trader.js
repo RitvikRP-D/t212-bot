@@ -107,7 +107,7 @@ function start(bus) {
     const tvr = bus.tvRatings && bus.tvRatings[sym];
     if (tvr && Date.now() - tvr.at < 30 * 60e3) {
       conf = Math.max(0, Math.min(1, conf + tvr.rec * 0.15));
-      tvNote = ` · TradingView says ${tvr.label} (${tvr.rec.toFixed(2)})`;
+      tvNote = ` · TradingView[122 metrics] says ${tvr.label} (${tvr.rec.toFixed(2)})${tvr.detail ? ': ' + tvr.detail : ''}`;
     }
     mk.lastConf = +conf.toFixed(2);
     mk.lastWhy = ev.reasons.join(' · ') + (lm !== 1 ? ` · learning ×${lm.toFixed(2)}` : '') + tvNote;
@@ -159,6 +159,7 @@ function start(bus) {
       const peakGain = (p.peak - p.entry) / p.entry;
       const ns = sentiFor(sym);
       let stop = -0.03, mode = 'stop loss';
+      if (mk.atrPct != null && mk.atrPct > 0.0009) { stop = -Math.min(0.055, Math.max(0.02, mk.atrPct * 35)); mode = 'ATR-sized stop'; }
       if (ns >= 0.5 && (mk.rsi == null || mk.rsi < 50)) { stop = -0.06; mode = 'wide stop (positive news, riding dip)'; }
       if (peakGain > 0.02) { stop = peakGain - 0.015; mode = 'trailing stop'; }
       if (stop < -0.08) stop = -0.08;
