@@ -34,6 +34,23 @@ function start(bus) {
     await expandUniverse();
     reconcile();
   }
+  const CACHE_FILE = require('path').join(__dirname, '..', 'bot-data', 'instruments-cache.json');
+  function loadFromCache() {
+    if (bus.universe.length > 1000) return; // already expanded
+    try {
+      const fs = require('fs');
+      if (!fs.existsSync(CACHE_FILE)) return;
+      const raw = JSON.parse(fs.readFileSync(CACHE_FILE, 'utf8'));
+      if (!Array.isArray(raw)) return;
+      const { universe, skipped } = fromInstruments(raw);
+      if (universe.length > bus.universe.length) {
+        bus.universe = universe;
+        for (const u of universe) t212Ticker[u.y] = u.t212;
+        bus.t212Status.mapped = Object.keys(t212Ticker).length;
+        console.log(`[t212] universe loaded from CACHE: ${universe.length} instruments (${skipped} unmappable skipped) — no API wait`);
+      }
+    } catch (e) { console.log('[t212] cache load failed: ' + e.message); }
+  }
   async function expandUniverse() {
     if (bus.universe.length > 1000) return; // already expanded
     try {
@@ -46,11 +63,14 @@ function start(bus) {
           console.log(`[t212] universe expanded to ${universe.length} instruments from your practice account (${skipped} unmappable skipped)`);
         }
         bus.t212Status.mapped = Object.keys(t212Ticker).length;
+        // refresh the on-disk cache so restarts are instant
+        try { require('fs').writeFileSync(CACHE_FILE, JSON.stringify(inst.body)); } catch (e) {}
       } else {
-        console.log('[t212] instruments fetch HTTP ' + inst.status + ' — will retry');
+        console.log('[t212] instruments fetch HTTP ' + inst.status + ' — using cache, will retry');
       }
-    } catch (e) { console.log('[t212] instruments fetch failed — will retry: ' + e.message); }
+    } catch (e) { console.log('[t212] instruments fetch failed — using cache, will retry: ' + e.message); }
   }
+  loadFromCache();   // instant 16k universe from disk — no API dependency
   tryConnect();
   setInterval(() => { if (!t212.connected()) tryConnect(); }, AUTH_RETRY_MS);
   setInterval(() => { if (t212.connected()) expandUniverse(); }, 3 * 60e3); // keep retrying until the 16k universe lands
@@ -160,15 +180,14 @@ function start(bus) {
     }
     mk.lastConf = +conf.toFixed(2);
     mk.lastWhy = ev.reasons.join(' · ') + (lm !== 1 ? ` · learning ×${lm.toFixed(2)}` : '') + tvNote;
-    // CRYPTO & COMMODITY signals can fire 24/7; stocks REQUIRE marketOpen() during closed hours
-    const isCryptoCommodity = (bus.crypto && Object.values(bus.crypto).find(c => c.etp === sym)) ||
-                               (bus.commod && Object.values(bus.commod).find(c => c.etp === sym));
-    const mustBeOpenVenue = !isCryptoCommodity; // stocks must be on an open venue
-    if (state.pause || conf < 0.55 || (mustBeOpenVenue && !marketOpen(sym)) || openCount() >= MAX_OPEN) return;
+    // EVERY instrument on T212 is exchange-listed (crypto ETPs & commodity ETCs trade on
+    // LSE/Xetra too) — so NOTHING trades on a closed venue. One rule for all: venue must be
+    // open by the clock. This is the hard guarantee against the holiday-order trap.
+    if (state.pause || conf < 0.55 || !marketOpen(sym) || openCount() >= MAX_OPEN) return;
     if (bus.riskGate && !bus.riskGate.canEnter()) return; // RISK GUARDIAN gate
-    // HOLIDAY/HALT GUARD: the clock can say "open" on an exchange holiday (learned
-    // this on July 4th weekend — 26 orders queued and blocked £9,996 of cash).
-    // Only enter when the newest 1-min bar is genuinely fresh.
+    // SECOND, INDEPENDENT GUARD: the clock can still say "open" on an unlisted exchange
+    // holiday (learned on July 4th — 26 orders blocked £9,996). So also require the newest
+    // 1-min bar to be genuinely fresh: no live prints = closed = never send an order.
     if (!mk.lastBarAt || Date.now() - mk.lastBarAt > 20 * 60e3) {
       mk.lastWhy = (mk.lastWhy || '') + ' · ⏸ venue prints stale (holiday/halt?) — not risking a blocked order';
       return;

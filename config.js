@@ -22,10 +22,21 @@ const HOURS = {
 function venue(sym){ const p = sym.split('.'); return p.length > 1 ? p[1] : 'US'; }
 function marketOpen(sym){
   const h = HOURS[venue(sym)]; if (!h) return false;
-  const parts = new Intl.DateTimeFormat('en-GB', { timeZone: h.tz, hour: 'numeric', minute: 'numeric', weekday: 'short', hour12: false }).formatToParts(new Date());
+  const now = new Date();
+  const parts = new Intl.DateTimeFormat('en-GB', { timeZone: h.tz, hour: 'numeric', minute: 'numeric', weekday: 'short', hour12: false }).formatToParts(now);
   const get = t => parts.find(p => p.type === t).value;
   const wd = get('weekday');
   if (wd === 'Sat' || wd === 'Sun') return false;
+  // US holidays (hard-coded 2026 holidays)
+  const v = venue(sym);
+  if (v === 'US') {
+    const month = now.getUTCMonth() + 1, day = now.getUTCDate();
+    // 2026: Jan 1, Feb Presidents Day (16), May Memorial Day (25), Jul 3-4 (holiday observed Fri for Sat), Nov Thanksgiving (26), Dec 25
+    const us_closed = [
+      [1,1], [1,19], [2,16], [5,25], [7,3], [7,4], [11,26], [12,25]  // 2026 US holidays
+    ];
+    if (us_closed.some(([m, d]) => m === month && d === day)) return false;
+  }
   const mins = parseInt(get('hour')) * 60 + parseInt(get('minute'));
   return mins >= h.open[0]*60 + h.open[1] && mins < h.close[0]*60 + h.close[1];
 }

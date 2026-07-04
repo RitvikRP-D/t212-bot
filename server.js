@@ -116,7 +116,7 @@ function snapshot() {
     nextOpens: nextOpenInfo(),
     market: top, positions,
     history: state.history.slice(0, 30),
-    news: { fng: bus.news.fng, global: bus.news.global, headlines: (bus.news.headlines || []).slice(0, 10), congress: (bus.news.congress || []).slice(0, 8) },
+    news: { fng: bus.news.fng, global: bus.news.global, feedsOk: bus.news.feedsOk, headlines: (bus.news.headlines || []).slice(0, 10), congress: (bus.news.congress || []).slice(0, 8), congressTop: (bus.news.congressTop || []).slice(0, 12), congressUpdated: bus.news.congressUpdated },
     learn: Object.entries(state.learn).filter(([k]) => k.endsWith(':ALL')).map(([k, v]) => ({ signal: k.replace(':ALL', ''), ...v })),
     equityCurve: state.equityCurve.slice(-240),
     lan: lanIP() + ':' + PORT,
