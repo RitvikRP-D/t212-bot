@@ -82,6 +82,7 @@ function start(bus) {
     if (bus.beat) bus.beat('newsradar');
     const fresh = [];
     let ok = 0;
+    let fails = 0;
     const at = Date.now();
     for (const [url, source, region] of SOURCES) {
       try {
@@ -96,7 +97,7 @@ function start(bus) {
           for (const [name, re] of Object.entries(ENTITIES)) if (re.test(it.title)) entities.push(name);
           fresh.push({ title: it.title, source, region, score, entities, at });
         }
-      } catch (e) { /* one bad feed never stalls the sweep */ }
+      } catch (e) { fails++; if (fails === 1) console.log('[newsradar] feed fetch failed: ' + e.message); }
     }
     // keep the seen-set from growing forever
     if (seen.size > 4000) { seen.clear(); }
