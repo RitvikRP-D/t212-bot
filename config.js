@@ -58,13 +58,27 @@ const PROFILES = {
     name: 'practice', perTradeCap: 0.90, sizeBase: 0.20, sizeSlope: 0.70,
     maxOpen: 10, minConf: 0.55, minHoldMin: 0, preferGBP: false,
     nonGbpPenalty: 0, minNotionalPerMin: 0, stopLoss: 0.018, dailyMaxLoss: 0.06,
+    minNetProfit: 0,
   },
   real: {
     name: 'real', perTradeCap: 0.25, sizeBase: 0.08, sizeSlope: 0.17,
     maxOpen: 6, minConf: 0.63, minHoldMin: 25, preferGBP: true,
     nonGbpPenalty: 0.04, minNotionalPerMin: 3000, stopLoss: 0.03, dailyMaxLoss: 0.05,
+    minNetProfit: 0.008,   // never take profit until gain clears fees + 0.8% NET
   },
 };
+
+// T212 fee/friction model → round-trip cost as a fraction of the position.
+// T212 Invest charges NO stock commission, but a 0.15% FX conversion EACH WAY on any
+// instrument not in the account currency (GBP). London/.L names are GBP → no FX; a
+// small spread buffer is still assumed. Applied only under the 'real' profile — which
+// also runs during real-profile validation on practice, so the P&L you judge is HONEST.
+//   non-GBP: 0.15%×2 FX + ~0.10% spread ≈ 0.40% round-trip
+//   GBP/.L : ~0.15% spread only
+function frictionPct(sym, profile) {
+  if (!profile || profile.name !== 'real') return 0;
+  return /\.L$/.test(String(sym)) ? 0.0015 : 0.0040;
+}
 // Pick the profile: explicit override wins; otherwise any LIVE account or any small
 // pot (< £2,000) gets the conservative profile automatically. So a real £100 account
 // is protected the moment it connects, with zero extra configuration.
@@ -80,7 +94,7 @@ function activeProfile(equity, isLive) {
 module.exports = {
   FALLBACK_UNIVERSE: [...US, ...ETF, ...UK, ...EU],
   NAMES, venue, marketOpen, nextOpenInfo,
-  PROFILES, activeProfile,
+  PROFILES, activeProfile, frictionPct,
   PORT: 3100,
   SCAN_MS: 350,            // one Yahoo fetch per 350ms, rotating open-market symbols
   HOT_EVERY: 3,            // every 3rd scan slot goes to the hot list (holdings + high-confidence)
