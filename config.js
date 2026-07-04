@@ -46,9 +46,41 @@ function nextOpenInfo(){
   return opens.join(' · ');
 }
 
+// ——— TRADING PROFILES ———
+// A £10k practice account can afford aggression; a small REAL account cannot —
+// FX conversion (~0.15% each way on non-GBP), spreads, and concentration will bleed
+// £100 dry. The 'real' profile sizes small, diversifies, prefers fee-free GBP/LSE
+// names, demands a higher edge, holds longer to avoid churn, and skips illiquid
+// tickers. It applies to EVERY execution path — stocks, crypto ETPs and commodity
+// ETCs all enter through the same trader gate.
+const PROFILES = {
+  practice: {
+    name: 'practice', perTradeCap: 0.90, sizeBase: 0.20, sizeSlope: 0.70,
+    maxOpen: 10, minConf: 0.55, minHoldMin: 0, preferGBP: false,
+    nonGbpPenalty: 0, minNotionalPerMin: 0, stopLoss: 0.018, dailyMaxLoss: 0.06,
+  },
+  real: {
+    name: 'real', perTradeCap: 0.25, sizeBase: 0.08, sizeSlope: 0.17,
+    maxOpen: 6, minConf: 0.63, minHoldMin: 25, preferGBP: true,
+    nonGbpPenalty: 0.04, minNotionalPerMin: 3000, stopLoss: 0.03, dailyMaxLoss: 0.05,
+  },
+};
+// Pick the profile: explicit override wins; otherwise any LIVE account or any small
+// pot (< £2,000) gets the conservative profile automatically. So a real £100 account
+// is protected the moment it connects, with zero extra configuration.
+function activeProfile(equity, isLive) {
+  const forced = (process.env.TRADING_PROFILE || 'auto').toLowerCase();
+  if (forced === 'real') return PROFILES.real;
+  if (forced === 'practice') return PROFILES.practice;
+  if (isLive) return PROFILES.real;
+  if (equity != null && isFinite(equity) && equity < 2000) return PROFILES.real;
+  return PROFILES.practice;
+}
+
 module.exports = {
   FALLBACK_UNIVERSE: [...US, ...ETF, ...UK, ...EU],
   NAMES, venue, marketOpen, nextOpenInfo,
+  PROFILES, activeProfile,
   PORT: 3100,
   SCAN_MS: 350,            // one Yahoo fetch per 350ms, rotating open-market symbols
   HOT_EVERY: 3,            // every 3rd scan slot goes to the hot list (holdings + high-confidence)

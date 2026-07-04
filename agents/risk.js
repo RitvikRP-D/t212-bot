@@ -5,10 +5,12 @@
 // Percentage-based → identical protection for £10,000 practice or £100 real
 // (£100 account: the instant equity < £90, everything stops).
 // Also: daily loss circuit-breaker, per-trade size cap, concentration warnings.
-const { RISK } = require('../config');
+const { RISK, activeProfile } = require('../config');
+const t212 = require('../lib/t212');
 
 function start(bus) {
   const state = bus.state;
+  bus.profile = activeProfile(null, t212.isLive());   // provisional until equity is known
   state.risk = state.risk || {};
   bus.riskStatus = {
     baseline: state.risk.baseline || null, floor: null, halted: !!state.risk.halted,
@@ -46,6 +48,10 @@ function start(bus) {
     bus.riskStatus.checked = new Date().toLocaleTimeString();
     const eq = equityNow();
     if (eq == null || !isFinite(eq) || eq <= 0) return;
+    // select the active trading profile from live-ness + account size (every agent reads bus.profile)
+    bus.profile = activeProfile(eq, t212.isLive());
+    bus.riskStatus.profile = bus.profile.name;
+    bus.riskStatus.live = t212.isLive();
     // warm-up: wait 2 min after connect so positions have reconciled before
     // locking the baseline — a half-loaded portfolio reads as a tiny account
     if (!state.risk.baseline) {
@@ -80,7 +86,7 @@ function start(bus) {
     if (state.risk.day !== today) { state.risk.day = today; state.risk.dayStart = eq; bus.riskStatus.dayPaused = false; bus.markDirty(); }
 
     const floor = state.risk.baseline * (1 - RISK.MAX_DRAWDOWN);
-    const dayFloor = (state.risk.dayStart || eq) * (1 - RISK.DAILY_MAX_LOSS);
+    const dayFloor = (state.risk.dayStart || eq) * (1 - (bus.profile.dailyMaxLoss || RISK.DAILY_MAX_LOSS));
     bus.riskStatus.baseline = +state.risk.baseline.toFixed(2);
     bus.riskStatus.floor = +floor.toFixed(2);
     bus.riskStatus.dayLoss = +Math.max(0, (state.risk.dayStart || eq) - eq).toFixed(2);
@@ -101,7 +107,7 @@ function start(bus) {
     // concentration check: warn if one position > PER_TRADE_CAP of equity
     for (const [s, p] of Object.entries(state.t212.positions)) {
       const val = (bus.market[s]?.price || p.entry) * p.qty;
-      if (val > eq * RISK.PER_TRADE_CAP * 1.05 && !p._concWarned) {
+      if (val > eq * bus.profile.perTradeCap * 1.05 && !p._concWarned) {
         p._concWarned = true;
         incident(`concentration: ${s} is ${(val / eq * 100).toFixed(0)}% of equity`);
       }
@@ -113,7 +119,8 @@ function start(bus) {
     canEnter: () => !bus.riskStatus.halted && !bus.riskStatus.dayPaused,
     capInvest: (invest) => {
       const eq = equityNow();
-      return eq ? Math.min(invest, eq * RISK.PER_TRADE_CAP) : invest;
+      const cap = (bus.profile && bus.profile.perTradeCap) || RISK.PER_TRADE_CAP;
+      return eq ? Math.min(invest, eq * cap) : invest;
     },
   };
 

@@ -178,13 +178,23 @@ function start(bus) {
       conf = Math.max(conf, mk.queuedBoost.conf);
       tvNote += ' · ' + mk.queuedBoost.reason;
     }
+    // ACTIVE PROFILE (practice vs real) — set by the risk guardian from live-ness + size.
+    const prof = bus.profile || { name: 'practice', perTradeCap: 0.90, sizeBase: 0.20, sizeSlope: 0.70, maxOpen: MAX_OPEN, minConf: 0.55, nonGbpPenalty: 0, minNotionalPerMin: 0, preferGBP: false };
+    // FEE-AWARE NUDGE: on a real GBP account, non-GBP names cost ~0.15%/side in FX —
+    // dock their confidence so fee-free LSE (.L) names win ties.
+    if (prof.nonGbpPenalty && !/\.L$/.test(sym)) conf = Math.max(0, conf - prof.nonGbpPenalty);
     mk.lastConf = +conf.toFixed(2);
-    mk.lastWhy = ev.reasons.join(' · ') + (lm !== 1 ? ` · learning ×${lm.toFixed(2)}` : '') + tvNote;
+    mk.lastWhy = ev.reasons.join(' · ') + (lm !== 1 ? ` · learning ×${lm.toFixed(2)}` : '') + tvNote + (prof.name === 'real' ? ' · [real profile]' : '');
     // EVERY instrument on T212 is exchange-listed (crypto ETPs & commodity ETCs trade on
     // LSE/Xetra too) — so NOTHING trades on a closed venue. One rule for all: venue must be
     // open by the clock. This is the hard guarantee against the holiday-order trap.
-    if (state.pause || conf < 0.55 || !marketOpen(sym) || openCount() >= MAX_OPEN) return;
+    if (state.pause || conf < prof.minConf || !marketOpen(sym) || openCount() >= prof.maxOpen) return;
     if (bus.riskGate && !bus.riskGate.canEnter()) return; // RISK GUARDIAN gate
+    // LIQUIDITY GATE (real money): skip thin names whose fills would be eaten by spread.
+    if (prof.minNotionalPerMin && (mk.notionalPerMin == null || mk.notionalPerMin < prof.minNotionalPerMin)) {
+      mk.lastWhy = (mk.lastWhy || '') + ' · ⏸ too illiquid for real money';
+      return;
+    }
     // SECOND, INDEPENDENT GUARD: the clock can still say "open" on an unlisted exchange
     // holiday (learned on July 4th — 26 orders blocked £9,996). So also require the newest
     // 1-min bar to be genuinely fresh: no live prints = closed = never send an order.
@@ -196,13 +206,14 @@ function start(bus) {
     if (t212.connected() && t212Ticker[sym]) {
       if (state.t212.positions[sym]) return;
       const cash = bus.t212Status.cash || 0;
-      const frac = Math.min(0.90, 0.20 + conf * 0.70); // scales with confidence, up to 90%
-      let invest = Math.min(cash * frac, cash - 50);
-      if (bus.riskGate) invest = bus.riskGate.capInvest(invest); // never > 90% of total equity
+      const frac = Math.min(prof.perTradeCap, prof.sizeBase + conf * prof.sizeSlope); // profile-scaled size
+      const reserve = Math.max(2, cash * 0.02);          // keep a small cash reserve for fees/slippage
+      let invest = Math.min(cash * frac, cash - reserve);
+      if (bus.riskGate) invest = bus.riskGate.capInvest(invest); // never > profile per-trade cap of equity
       if (invest < T212_MIN_ORDER) return;
       const qty = +(invest / mk.price).toFixed(4);
       if (qty <= 0) return;
-      state.t212.positions[sym] = { t212Ticker: t212Ticker[sym], entry: mk.price, qty, invested: invest, opened: now(), peak: mk.price, conf, sigType: ev.sigType, reason: mk.lastWhy, pendingFill: true };
+      state.t212.positions[sym] = { t212Ticker: t212Ticker[sym], entry: mk.price, qty, invested: invest, opened: now(), openedAt: Date.now(), peak: mk.price, conf, sigType: ev.sigType, reason: mk.lastWhy, pendingFill: true };
       // T212 instruments differ in allowed quantity precision — retry coarser on 400
       let r = await t212.marketOrder(t212Ticker[sym], qty);
       for (const dp of [2, 1, 0]) {
@@ -247,16 +258,21 @@ function start(bus) {
       const gain = (mk.price - p.entry) / p.entry;
       const peakGain = (p.peak - p.entry) / p.entry;
       const ns = sentiFor(sym);
-      let stop = -0.018, mode = 'stop loss (tight on big bets)';
+      const prof = bus.profile || { stopLoss: 0.018, minHoldMin: 0 };
+      const heldMin = p.openedAt ? (Date.now() - p.openedAt) / 60000 : 999;
+      const matured = heldMin >= (prof.minHoldMin || 0);   // min-hold reduces fee-churn on real money
+      let stop = -(prof.stopLoss || 0.018), mode = 'stop loss';
       if (mk.atrPct != null && mk.atrPct > 0.0009) { stop = -Math.min(0.04, Math.max(0.012, mk.atrPct * 22)); mode = 'ATR-sized stop'; }
       if (ns >= 0.5 && (mk.rsi == null || mk.rsi < 50)) { stop = -0.06; mode = 'wide stop (positive news, riding dip)'; }
       if (peakGain > 0.02) { stop = peakGain - 0.015; mode = 'trailing stop'; }
       if (stop < -0.08) stop = -0.08;
       let why = null;
+      // capital protection ALWAYS fires (stop loss / trailing / bad news) regardless of hold time;
+      // discretionary profit-taking waits until the position has matured past the min hold.
       if (gain <= stop) why = stop > 0 ? `${mode}: locked +${(gain*100).toFixed(2)}% (peak +${(peakGain*100).toFixed(2)}%)` : `${mode} at ${(gain*100).toFixed(2)}%`;
-      else if (mk.rsi != null && mk.rsi > 70 && mk.crossDown && gain > 0) why = `overbought RSI ${mk.rsi.toFixed(1)} — taking +${(gain*100).toFixed(2)}%`;
       else if (ns <= -1.5 && gain > -0.02) why = `bad news flow (${ns}) — exiting at ${(gain*100).toFixed(2)}%`;
-      else {
+      else if (matured && mk.rsi != null && mk.rsi > 70 && mk.crossDown && gain > 0) why = `overbought RSI ${mk.rsi.toFixed(1)} — taking +${(gain*100).toFixed(2)}%`;
+      else if (matured) {
         const tvx = bus.tvRatings && bus.tvRatings[sym];
         if (tvx && Date.now() - tvx.at < 30 * 60e3 && tvx.rec <= -0.5 && gain > 0.005)
           why = `TradingView flipped to STRONG SELL (${tvx.rec.toFixed(2)}) — locking +${(gain*100).toFixed(2)}%`;

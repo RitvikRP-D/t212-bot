@@ -105,7 +105,7 @@ function start(bus) {
       bus.news.global ?? '',
       bus.news.fng ? `${bus.news.fng.value} ${bus.news.fng.label}` : '',
       cg ? `congress: ${cg.ticker} ${cg.val.toFixed(2)}` : '',
-      bus.risk?.halted ? 'HALTED' : 'live',
+      `${bus.riskStatus?.live ? 'LIVE£' : 'practice'}/${bus.riskStatus?.profile || '?'}${bus.riskStatus?.halted ? ' HALTED' : ''}`,
     ]);
   }
   setTimeout(heartbeat, 8000);       // first beat shortly after boot
