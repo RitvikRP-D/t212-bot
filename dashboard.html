@@ -42,7 +42,7 @@
 </head>
 <body>
   <h1><span class="dot" id="dot"></span>T212 VIRTUAL TRADER <span class="muted">practice account only · separate project</span></h1>
-  <div class="sub">universe <b id="uni">…</b> instruments · phone: <b id="lan">…</b> · <span id="clock"></span> <button id="pauseBtn" onclick="fetch('/api/pause',{method:'POST'})" style="margin-left:8px;">pause</button></div>
+  <div class="sub">universe <b id="uni">…</b> instruments · phone: <b id="lan">…</b> · <span id="clock"></span> <button id="pauseBtn" onclick="fetch('/api/pause',{method:'POST'})" style="margin-left:8px;">pause</button><button id="killBtn" onclick="if(confirm('KILL SWITCH: liquidate ALL positions and pause the bot?'))fetch('/api/kill',{method:'POST'})" style="margin-left:6px;background:#5a1f1f;border-color:#7a2a2a;color:#ffd7d7;">🛑 KILL</button></div>
 
   <div class="agents" id="agents"></div>
 

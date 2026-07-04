@@ -67,7 +67,7 @@ require('./agents/allocator').start(bus);   // ⑰ overnight order queue → fir
 require('./agents/sentinel').start(bus);    // ⑨ constant checker / auto-repair
 require('./agents/medic').start(bus);       // ⑧ self-healer / fleet supervisor
 require('./agents/logger').start(bus);      // ④ xlsx + csv + Google Sheet
-require('./agents/telegram').start(bus);    // ⑱ phone alerts + kill-switch (after logger: wraps onTrade)
+require('./agents/alerts').start(bus);      // ⑱ email alerts (after logger: wraps onTrade)
 require('./agents/tradingview').start(bus); // ⑤ optional local TradingView-app bridge
 
 function lanIP() {
@@ -107,7 +107,7 @@ function snapshot() {
     cryptoTV: bus.ctvStatus, commodities: { status: bus.commodStatus, top: commodTop },
     deepNews: { global: (bus.deepNews || {}).global, perTopic: (bus.deepNews || {}).perTopic, sources: (bus.deepNews || {}).sources, updated: (bus.deepNews || {}).updated, headlines: ((bus.deepNews || {}).headlines || []).slice(0, 6) },
     historian: bus.histStatus, ranker: bus.rankStatus, marketMap: bus.marketMap, alloc: bus.allocStatus,
-    earnings: { count: (bus.earnings || {}).count, updated: (bus.earnings || {}).updated }, tg: bus.tgStatus,
+    earnings: { count: (bus.earnings || {}).count, updated: (bus.earnings || {}).updated }, alerts: bus.alertStatus,
     queue: Object.entries(state.queue || {}).map(([sym, q]) => ({ sym, ...q })),
     newsAgent: { updated: bus.news.updated, headlines: (bus.news.headlines || []).length, congress: (bus.news.congress || []).length },
     paperCash: +state.paper.balance.toFixed(2),
