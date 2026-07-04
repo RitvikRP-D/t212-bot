@@ -171,6 +171,7 @@ function start(bus) {
       top: ranked.slice(0, 8).map(r => ({ sym: r.sym, net: r.net, score: r.score })),
     };
     if (analysed.length > DISK_CAP) console.log(`[pine] ${analysed.length} analysed, broadcast all; wrote top ${DISK_CAP} .pine files to disk`);
+    if (bus.beat) bus.beat('pine');
   }
 
   setInterval(cycle, CYCLE_MS);

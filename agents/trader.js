@@ -5,7 +5,8 @@
 const t212 = require('../lib/t212');
 const { evaluate } = require('../lib/indicators');
 const { fromInstruments, fallback } = require('../lib/universe');
-const { TRADER_TICK_MS, T212_MIN_ORDER, AUTH_RETRY_MS, MAX_OPEN, marketOpen, frictionPct } = require('../config');
+const { TRADER_TICK_MS, T212_MIN_ORDER, AUTH_RETRY_MS, MAX_OPEN, marketOpen, frictionPct, minsToClose, VARIANT } = require('../config');
+const { sectorOf, countryOf } = require('../lib/fleet');
 
 function now() { return new Date().toLocaleTimeString(); }
 
@@ -204,12 +205,49 @@ function start(bus) {
       conf = Math.max(0, Math.min(1, conf + Math.max(-0.02, Math.min(0.02, p.bias * 0.02))));
       tvNote += ` · Pine ${p.net >= 0 ? '+' : ''}${p.net} confluence`;
     }
+
+    // ——— CONSENSUS VOTES (#1) — which independent agents back this entry ———
+    const votes = ['signal'];
+    if (tvr && Date.now() - tvr.at < 30 * 60e3 && tvr.rec > 0.15) votes.push('tv');
+    if (lt && Date.now() - lt.at < 25 * 3600e3 && lt.regime > 0) votes.push('historian');
+    if (bus.rankTop && bus.rankTop.has(sym)) votes.push('ranker');
+    if (bus.pine && bus.pine[sym] && bus.pine[sym].net >= 2) votes.push('pine');
+    if (senti > 0.2) votes.push('news');
+    if (bus.news.congressBoost && bus.news.congressBoost[sym.split('.')[0]] > 0) votes.push('congress');
+    if ((mk.volSurge || 0) > 1.8) votes.push('volume');
+    mk.lastVotes = votes;
+
+    // ——— ENTRY TIMING (#8) — don't catch a falling knife on reversal setups ———
+    const reversalSig = /RSI_OVERSOLD|RSI_DIP|DIP_REVERSAL|BB_BOUNCE/.test(ev.sigType || '');
+    const cl = mk.closes;
+    const turningUp = cl && cl.length >= 2 && cl[cl.length - 1] >= cl[cl.length - 2];
+    let timingBlock = false;
+    if (reversalSig && !turningUp) { if (prof.name === 'real') timingBlock = true; else conf *= 0.85; }
+
+    // ——— SIGNAL TIME-DECAY (#9) — a setup that's been live a while without triggering is stale ———
+    if (!mk._sig || mk._sig.type !== ev.sigType) mk._sig = { type: ev.sigType, at: Date.now() };
+    const sigAgeMin = (Date.now() - mk._sig.at) / 60000;
+    if (sigAgeMin > 8) { conf *= Math.max(0.8, 1 - (sigAgeMin - 8) / 40 * 0.2); tvNote += ` · signal ${sigAgeMin.toFixed(0)}m old`; }
+
+    // ——— REGIME + VOLATILITY (#5/#10) — scale conviction to the tape ———
+    const reg = bus.regime;
+    if (reg && reg.mult) { conf *= reg.mult.conf; if (reg.state && reg.state !== 'unknown') tvNote += ` · ${reg.state}`; }
+
+    // ——— DRAWDOWN RECOVERY (#4) — below baseline but above the hard floor: trade smaller/pickier ———
+    const recovering = bus.riskStatus && bus.riskStatus.recovery;
+    if (recovering) { conf *= 0.9; tvNote += ' · recovery mode'; }
+
+    conf = Math.max(0, Math.min(1, conf));
     mk.lastConf = +conf.toFixed(2);
     mk.lastWhy = ev.reasons.join(' · ') + (lm !== 1 ? ` · learning ×${lm.toFixed(2)}` : '') + tvNote + (prof.name === 'real' ? ' · [real profile]' : '');
     // EVERY instrument on T212 is exchange-listed (crypto ETPs & commodity ETCs trade on
     // LSE/Xetra too) — so NOTHING trades on a closed venue. One rule for all: venue must be
     // open by the clock. This is the hard guarantee against the holiday-order trap.
-    if (state.pause || conf < prof.minConf || !marketOpen(sym) || openCount() >= prof.maxOpen) return;
+    const minConf = prof.minConf + (recovering ? 0.10 : 0);   // recovery mode demands a bigger edge
+    if (state.pause || conf < minConf || !marketOpen(sym) || openCount() >= prof.maxOpen) return;
+    if (timingBlock) { mk.lastWhy = (mk.lastWhy || '') + ' · ⏸ still falling — waiting for the turn'; return; }
+    if (votes.length < (prof.consensusMin || 1)) { mk.lastWhy = (mk.lastWhy || '') + ` · ⏸ only ${votes.length} agent vote${votes.length === 1 ? '' : 's'} (need ${prof.consensusMin})`; return; }
+    if (bus.perfBlocked && bus.perfBlocked()) { mk.lastWhy = (mk.lastWhy || '') + ' · ⏸ performance cool-off'; return; }
     if (bus.riskGate && !bus.riskGate.canEnter()) return; // RISK GUARDIAN gate
     // LIQUIDITY GATE (real money): skip thin names whose fills would be eaten by spread.
     if (prof.minNotionalPerMin && (mk.notionalPerMin == null || mk.notionalPerMin < prof.minNotionalPerMin)) {
@@ -240,6 +278,18 @@ function start(bus) {
           return;
         }
       }
+      // SECTOR / COUNTRY DIVERSIFICATION CAP (#6): don't let the book pile into one theme.
+      const held = Object.keys(state.t212.positions);
+      if (held.length >= 2) {
+        const afterN = held.length + 1;
+        const sec = sectorOf(sym), cty = countryOf(sym);
+        if (sec !== 'index' && sec !== 'other') {
+          const sameSec = held.filter(h => sectorOf(h) === sec).length + 1;
+          if (sameSec / afterN > prof.sectorCap) { mk.lastWhy = (mk.lastWhy || '') + ` · ⏸ ${sec} already ${Math.round(sameSec / afterN * 100)}% of book`; return; }
+        }
+        const sameCty = held.filter(h => countryOf(h) === cty).length + 1;
+        if (sameCty / afterN > prof.countryCap) { mk.lastWhy = (mk.lastWhy || '') + ` · ⏸ ${cty} already ${Math.round(sameCty / afterN * 100)}% of book`; return; }
+      }
     }
     // SECOND, INDEPENDENT GUARD: the clock can still say "open" on an unlisted exchange
     // holiday (learned on July 4th — 26 orders blocked £9,996). So also require the newest
@@ -252,14 +302,15 @@ function start(bus) {
     if (t212.connected() && t212Ticker[sym]) {
       if (state.t212.positions[sym]) return;
       const cash = bus.t212Status.cash || 0;
-      const frac = Math.min(prof.perTradeCap, prof.sizeBase + conf * prof.sizeSlope); // profile-scaled size
+      const sizeMul = (reg && reg.mult ? reg.mult.size : 1) * (recovering ? 0.5 : 1);   // regime + recovery shrink size
+      const frac = Math.min(prof.perTradeCap, (prof.sizeBase + conf * prof.sizeSlope) * sizeMul);
       const reserve = Math.max(2, cash * 0.02);          // keep a small cash reserve for fees/slippage
       let invest = Math.min(cash * frac, cash - reserve);
       if (bus.riskGate) invest = bus.riskGate.capInvest(invest); // never > profile per-trade cap of equity
       if (invest < T212_MIN_ORDER) return;
       const qty = +(invest / mk.price).toFixed(4);
       if (qty <= 0) return;
-      state.t212.positions[sym] = { t212Ticker: t212Ticker[sym], entry: mk.price, qty, invested: invest, opened: now(), openedAt: Date.now(), peak: mk.price, conf, sigType: ev.sigType, reason: mk.lastWhy, pendingFill: true };
+      state.t212.positions[sym] = { t212Ticker: t212Ticker[sym], entry: mk.price, intendedPrice: mk.price, qty, origQty: qty, invested: invest, opened: now(), openedAt: Date.now(), peak: mk.price, conf, sigType: ev.sigType, reason: mk.lastWhy, votes, variant: VARIANT, pendingFill: true };
       // REAL money uses a MARKETABLE LIMIT — priced a hair through the spread so it fills
       // immediately but can never pay more than +0.3% above mid (caps slippage on 16k names).
       // PRACTICE uses a plain market order. Falls back to market if the venue rejects the limit.
@@ -281,11 +332,13 @@ function start(bus) {
         state.t212.positions[sym].pendingFill = false;
         bus.t212Status.orders++;
         bus.t212Status.cash = Math.max(0, cash - invest);
-        pushHist({ t: now(), sym, ledger: 'T212-PRACTICE', action: 'BUY', price: mk.price, qty: state.t212.positions[sym].qty, pnl: null, why: `${mk.lastWhy} — conf ${(conf*100).toFixed(0)}%, ~${invest.toFixed(2)} → REAL order on practice account (check your T212 app)` });
+        pushHist({ t: now(), sym, ledger: 'T212-PRACTICE', action: 'BUY', price: mk.price, qty: state.t212.positions[sym].qty, pnl: null, votes, cond: { rsi: mk.rsi != null ? +mk.rsi.toFixed(1) : null, regime: reg ? reg.state : null, sector: sectorOf(sym), atrPct: mk.atrPct }, why: `${mk.lastWhy} — conf ${(conf*100).toFixed(0)}%, votes[${votes.join(',')}], ~${invest.toFixed(2)} → REAL order on practice account (check your T212 app)` });
         console.log(`[trade] T212 BUY ${t212Ticker[sym]} qty=${state.t212.positions[sym].qty}`);
       } else {
         delete state.t212.positions[sym];
         bus.t212Status.lastError = `order rejected HTTP ${r.status}: ${JSON.stringify(r.body).slice(0, 140)}`;
+        // DEAD-LETTER (#12): hand the failed order to the auditor to surface + alert
+        (bus.deadLetter = bus.deadLetter || []).push({ sym, ticker: t212Ticker[sym], error: `HTTP ${r.status}: ${JSON.stringify(r.body).slice(0, 100)}`, t: now(), at: Date.now() });
         console.log('[t212] ' + bus.t212Status.lastError);
       }
       return;
@@ -320,19 +373,38 @@ function start(bus) {
       const tpFloor = friction + (prof.minNetProfit || 0);  // don't bank a "profit" that fees would eat
       const netGain = gain - friction;                      // what you actually keep
       const edx = (prof.name === 'real' && bus.earningsInDays) ? bus.earningsInDays(sym) : null;  // days to earnings
+      const rDist = Math.min(0.04, Math.max(0.012, (mk.atrPct || 0.0015) * 22));   // ~1R risk distance
+      const regStop = (bus.regime && bus.regime.mult ? bus.regime.mult.stop : 1);
+      const phaseMul = heldMin < 10 ? 0.85 : heldMin < 30 ? 1.1 : 1.0;             // DYNAMIC STOP by hold phase (#18)
       let stop = -(prof.stopLoss || 0.018), mode = 'stop loss';
-      if (mk.atrPct != null && mk.atrPct > 0.0009) { stop = -Math.min(0.04, Math.max(0.012, mk.atrPct * 22)); mode = 'ATR-sized stop'; }
-      if (ns >= 0.5 && (mk.rsi == null || mk.rsi < 50)) { stop = -0.06; mode = 'wide stop (positive news, riding dip)'; }
-      // trailing only ARMS once we're safely above the fee hurdle, and never trails to a
-      // level that would lock in a net loss (floor the trail at friction + a hair).
+      if (mk.atrPct != null && mk.atrPct > 0.0009) { stop = -Math.min(0.05, rDist * regStop * phaseMul); mode = 'ATR/regime stop'; }
+      if (ns >= 0.5 && (mk.rsi == null || mk.rsi < 50)) { stop = Math.min(stop, -0.06); mode = 'wide stop (positive news, riding dip)'; }
+      // BREAKEVEN+ LOCK (#18): once comfortably net-positive, never hand it back to a loss
+      if (matured && netGain > tpFloor + 0.006) { stop = Math.max(stop, friction + 0.001); mode = 'breakeven+ lock'; }
+      // trailing arms once safely above the fee hurdle, never trails into a net loss
       if (peakGain > tpFloor + 0.015) { stop = Math.max(peakGain - 0.015, friction + 0.002); mode = 'trailing stop (net-positive)'; }
+      if (p.overnightLock) stop = Math.max(stop, friction + 0.001);                // held overnight → protect it
       if (stop < -0.08) stop = -0.08;
+      // PROFIT LADDER (#19): bank in thirds as it works, let the final third run.
+      if (ledger === 'T212-PRACTICE' && (bus.profile || {}).ladder && matured && gain > tpFloor) {
+        if (!p.ladder1 && gain >= rDist * 1.0) { p.ladder1 = true; scaleOut(sym, book, p, mk, 1 / 3, `ladder +1R — banked ⅓ (+${(netGain*100).toFixed(2)}% net)`); return; }
+        if (p.ladder1 && !p.ladder2 && gain >= rDist * 1.5) { p.ladder2 = true; scaleOut(sym, book, p, mk, 0.5, `ladder +1.5R — banked another ⅓`); return; }
+      }
+      const mtc = ((bus.profile || {}).name === 'real') ? minsToClose(sym) : null;   // minutes to venue close
       let why = null;
       // capital protection ALWAYS fires (stop loss / trailing / bad news) regardless of hold time;
       // discretionary profit-taking waits until matured AND net-of-fees positive.
       if (gain <= stop) why = stop > 0 ? `${mode}: locked +${(netGain*100).toFixed(2)}% net (peak +${(peakGain*100).toFixed(2)}%)` : `${mode} at ${(gain*100).toFixed(2)}%`;
       else if (edx != null && edx >= 0 && edx <= 1) why = `earnings in ${edx}d — going flat before the gap (${(netGain*100).toFixed(2)}% net)`;
       else if (ns <= -1.5 && gain > -0.02) why = `bad news flow (${ns}) — exiting at ${(netGain*100).toFixed(2)}% net`;
+      // OVERNIGHT HOLD DECISION (#20): near the close, only carry a green, non-earnings winner
+      // in a trending tape (with its stop tightened); otherwise flatten to dodge the gap.
+      else if (mtc != null && mtc <= 12) {
+        if (netGain <= 0.001) why = `flat before the close — not carrying a red position overnight (${(netGain*100).toFixed(2)}%)`;
+        else if (!(bus.profile || {}).overnightHold) why = `banking +${(netGain*100).toFixed(2)}% net before the close`;
+        else if (bus.regime && bus.regime.state === 'trend' && matured) { p.overnightLock = true; }   // hold, protected
+        else why = `banking +${(netGain*100).toFixed(2)}% net before the close (no trend to carry)`;
+      }
       else if (matured && gain > tpFloor && mk.rsi != null && mk.rsi > 70 && mk.crossDown) why = `overbought RSI ${mk.rsi.toFixed(1)} — banking +${(netGain*100).toFixed(2)}% net`;
       else if (matured && gain > tpFloor) {
         const tvx = bus.tvRatings && bus.tvRatings[sym];
@@ -363,6 +435,25 @@ function start(bus) {
     console.log(`[trade] ${ledger} SELL ${sym} pnl=${pnl.toFixed(2)}`);
     bus.markDirty();
   }
+  // PARTIAL SELL for the profit ladder — sells `fraction` of the CURRENT qty, books that
+  // slice's net P&L, keeps the rest running. Only used on the T212 book.
+  async function scaleOut(sym, book, p, mk, fraction, why) {
+    const q = +(p.qty * fraction).toFixed(4);
+    if (q <= 0 || q >= p.qty) return;
+    const r = await t212.marketOrder(p.t212Ticker, -q);
+    if (r.status !== 200) { (bus.deadLetter = bus.deadLetter || []).push({ sym, error: `ladder sell HTTP ${r.status}`, t: now(), at: Date.now() }); return; }
+    bus.t212Status.orders++;
+    const gross = (mk.price - p.entry) * q;
+    const fee = frictionPct(sym, bus.profile, mk) * (p.entry * q);
+    const pnl = gross - fee;
+    p.qty = +(p.qty - q).toFixed(4);
+    state.realized += pnl;
+    learnRecord(p.sigType, sym, pnl);
+    pushHist({ t: now(), sym, ledger: 'T212-PRACTICE', action: 'SELL', price: mk.price, qty: q, pnl: +pnl.toFixed(2), why });
+    console.log(`[trade] LADDER partial SELL ${sym} q=${q} pnl=${pnl.toFixed(2)}`);
+    bus.markDirty();
+  }
+
   bus.onTick = exitCheck;
   bus.tryEnter = tryEnter;   // allocator fires queued conviction through here at the bell
   // RISK GUARDIAN authority: close everything at market, immediately
@@ -379,6 +470,7 @@ function start(bus) {
   };
 
   setInterval(() => {
+    if (bus.beat) bus.beat('trader');
     for (const [sym, mk] of Object.entries(bus.market)) {
       if (mk.price == null || mk.rsi == null) continue;
       tryEnter(sym, mk);

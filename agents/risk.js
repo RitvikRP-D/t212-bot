@@ -46,6 +46,7 @@ function start(bus) {
   let connectedAt = null;
   function check() {
     bus.riskStatus.checked = new Date().toLocaleTimeString();
+    if (bus.beat) bus.beat('risk');
     const eq = equityNow();
     if (eq == null || !isFinite(eq) || eq <= 0) return;
     // select the active trading profile from live-ness + account size (every agent reads bus.profile)
@@ -101,6 +102,15 @@ function start(bus) {
     bus.riskStatus.floor = +floor.toFixed(2);
     bus.riskStatus.dayLoss = +Math.max(0, (state.risk.dayStart || eq) - eq).toFixed(2);
     bus.riskStatus.equity = +eq.toFixed(2);
+
+    // DRAWDOWN RECOVERY MODE (#4): between the recovery trigger and the hard floor, the
+    // trader trades smaller, pickier, tighter — a gentle brake BEFORE the full halt.
+    const below = state.risk.baseline ? (state.risk.baseline - eq) / state.risk.baseline : 0;
+    const recTrig = (bus.profile && bus.profile.recoveryTrigger) || 0.05;
+    const wasRecovering = bus.riskStatus.recovery;
+    bus.riskStatus.recovery = !bus.riskStatus.halted && below > recTrig && below < RISK.MAX_DRAWDOWN;
+    if (bus.riskStatus.recovery && !wasRecovering) incident(`recovery mode ON — ${(below * 100).toFixed(1)}% below baseline; sizing/entries tightened`);
+    if (!bus.riskStatus.recovery && wasRecovering) incident('recovery mode cleared — back near baseline');
 
     if (!bus.riskStatus.halted && eq < floor) {
       bus.riskStatus.halted = true;

@@ -40,6 +40,15 @@ function marketOpen(sym){
   const mins = parseInt(get('hour')) * 60 + parseInt(get('minute'));
   return mins >= h.open[0]*60 + h.open[1] && mins < h.close[0]*60 + h.close[1];
 }
+// minutes until this symbol's venue closes (null if closed now) — used for overnight-hold logic
+function minsToClose(sym){
+  const h = HOURS[venue(sym)]; if (!h) return null;
+  if (!marketOpen(sym)) return null;
+  const parts = new Intl.DateTimeFormat('en-GB', { timeZone: h.tz, hour: 'numeric', minute: 'numeric', hour12: false }).formatToParts(new Date());
+  const get = t => parts.find(p => p.type === t).value;
+  const mins = parseInt(get('hour')) * 60 + parseInt(get('minute'));
+  return (h.close[0]*60 + h.close[1]) - mins;
+}
 function nextOpenInfo(){
   const opens = [];
   for (const [v, h] of Object.entries(HOURS)) opens.push(`${v} ${String(h.open[0]).padStart(2,'0')}:${String(h.open[1]).padStart(2,'0')} ${h.tz.split('/')[1]}`);
@@ -59,6 +68,8 @@ const PROFILES = {
     maxOpen: 10, minConf: 0.55, minHoldMin: 0, preferGBP: false,
     nonGbpPenalty: 0, minNotionalPerMin: 0, stopLoss: 0.018, dailyMaxLoss: 0.06,
     minNetProfit: 0, dailyProfitTarget: 0.08,
+    consensusMin: 1, sectorCap: 1.0, countryCap: 1.0, ladder: false,
+    recoveryTrigger: 0.06, overnightHold: false,
   },
   real: {
     name: 'real', perTradeCap: 0.25, sizeBase: 0.08, sizeSlope: 0.17,
@@ -66,8 +77,18 @@ const PROFILES = {
     nonGbpPenalty: 0.04, minNotionalPerMin: 3000, stopLoss: 0.03, dailyMaxLoss: 0.05,
     minNetProfit: 0.008,   // never take profit until gain clears fees + 0.8% NET
     dailyProfitTarget: 0.03,   // up +3% on the day → bank it, no new entries till tomorrow
+    consensusMin: 2,       // ≥2 independent agent votes required to open (kills lone false-positives)
+    sectorCap: 0.5,        // ≤50% of open positions in one sector
+    countryCap: 0.67,      // ≤2/3 of open positions in one country/venue
+    ladder: true,          // scale out in thirds at +1R / +1.5R / target
+    recoveryTrigger: 0.04, // >4% below baseline (but above the 10% hard floor) → recovery mode
+    overnightHold: true,   // may hold a green, non-earnings position through the close
   },
 };
+// A/B VARIANT — run a second demo instance with VARIANT=b to test a tweak against the
+// baseline (both tag their trades so you can compare P&L). No effect unless set to 'b'.
+const VARIANT = (process.env.VARIANT || 'a').toLowerCase();
+if (VARIANT === 'b') { PROFILES.real.minConf += 0.02; PROFILES.real.dailyProfitTarget = 0.025; PROFILES.practice.minConf += 0.02; }
 
 // T212 fee/friction model → round-trip cost as a fraction of the position.
 // T212 Invest charges NO stock commission, but a 0.15% FX conversion EACH WAY on any
@@ -109,8 +130,8 @@ function activeProfile(equity, isLive) {
 
 module.exports = {
   FALLBACK_UNIVERSE: [...US, ...ETF, ...UK, ...EU],
-  NAMES, venue, marketOpen, nextOpenInfo,
-  PROFILES, activeProfile, frictionPct,
+  NAMES, venue, marketOpen, nextOpenInfo, minsToClose,
+  PROFILES, activeProfile, frictionPct, VARIANT,
   PORT: 3100,
   SCAN_MS: 350,            // one Yahoo fetch per 350ms, rotating open-market symbols
   HOT_EVERY: 3,            // every 3rd scan slot goes to the hot list (holdings + high-confidence)

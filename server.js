@@ -35,6 +35,7 @@ const bus = {
   universe: fallback(),
   markDirty: () => { dirty = true; },
   onTick: null, onTrade: null,
+  beats: {}, beat: (n) => { bus.beats[n] = Date.now(); },   // fleet heartbeat pings (medic also owns this)
 };
 setInterval(() => { if (dirty) { try { fs.writeFileSync(STATE_FILE, JSON.stringify(state)); } catch (e) {} dirty = false; } }, 5000);
 bus.saveNow = () => { try { fs.writeFileSync(STATE_FILE, JSON.stringify(state)); dirty = false; } catch (e) {} };
@@ -43,11 +44,17 @@ for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { try { fs.writeF
 // Cloud mode: GitHub Actions jobs must end before the 6h hard limit, so exit
 // cleanly after MAX_RUN_MINUTES; the next scheduled run restores state and continues.
 const maxMin = parseFloat(process.env.MAX_RUN_MINUTES || '0');
-if (maxMin > 0) setTimeout(() => {
-  try { fs.writeFileSync(STATE_FILE, JSON.stringify(state)); } catch (e) {}
-  console.log(`[server] ${maxMin} min run window done — exiting cleanly for next scheduled run`);
-  process.exit(0);
-}, maxMin * 60000);
+if (maxMin > 0) {
+  // Warn 90s before the hard exit so agents can flush; then save + notify + exit. Positions
+  // are intentionally CARRIED across runs (the next run's reconcile re-adopts them from T212),
+  // so we never liquidate here — we just persist state and confirm a clean handoff.
+  setTimeout(() => { try { if (bus.notify) bus.notify(`⏱️ Cloud run window ending — saving state and handing off to the next scheduled run. Open positions: ${Object.keys(state.t212.positions).length}.`); } catch (e) {} }, Math.max(0, maxMin * 60000 - 90000));
+  setTimeout(() => {
+    try { fs.writeFileSync(STATE_FILE, JSON.stringify(state)); } catch (e) {}
+    console.log(`[server] ${maxMin} min run window done — state saved, exiting cleanly for next scheduled run`);
+    process.exit(0);
+  }, maxMin * 60000);
+}
 
 // ——— SYSTEM X2 fleet ———
 require('./agents/risk').start(bus);        // ⑦ risk guardian (10% hard floor) — first, so gates exist
@@ -63,7 +70,11 @@ require('./agents/ranker').start(bus);      // ⑮ whole-universe leaderboard
 require('./agents/marketmap').start(bus);   // ⑯ venue air-traffic control
 require('./agents/earnings').start(bus);    // ⑲ earnings blackout calendar (real profile)
 require('./agents/pine').start(bus);        // ⑳ Pine Smith — Pine v5 per stock, broadcasts confluence
+require('./agents/regime').start(bus);      // ㉑ market regime + volatility detector
 require('./agents/trader').start(bus);      // ③ the trader (T212 practice orders)
+require('./agents/perf').start(bus);        // ㉒ performance monitor + per-agent scorecard
+require('./agents/auditor').start(bus);     // ㉓ execution auditor + integrity watch
+require('./agents/heartbeat').start(bus);   // ㉔ fleet liveness monitor
 require('./agents/allocator').start(bus);   // ⑰ overnight order queue → fires at the bell
 require('./agents/sentinel').start(bus);    // ⑨ constant checker / auto-repair
 require('./agents/medic').start(bus);       // ⑧ self-healer / fleet supervisor
@@ -109,7 +120,7 @@ function snapshot() {
     deepNews: { global: (bus.deepNews || {}).global, perTopic: (bus.deepNews || {}).perTopic, sources: (bus.deepNews || {}).sources, updated: (bus.deepNews || {}).updated, headlines: ((bus.deepNews || {}).headlines || []).slice(0, 6) },
     historian: bus.histStatus, ranker: bus.rankStatus, marketMap: bus.marketMap, alloc: bus.allocStatus,
     earnings: { count: (bus.earnings || {}).count, updated: (bus.earnings || {}).updated }, alerts: bus.alertStatus,
-    pine: bus.pineStatus,
+    pine: bus.pineStatus, regime: bus.regime, perf: bus.perf, audit: bus.audit, fleet: bus.fleet,
     queue: Object.entries(state.queue || {}).map(([sym, q]) => ({ sym, ...q })),
     newsAgent: { updated: bus.news.updated, headlines: (bus.news.headlines || []).length, congress: (bus.news.congress || []).length },
     paperCash: +state.paper.balance.toFixed(2),

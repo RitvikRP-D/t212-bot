@@ -69,6 +69,28 @@ function start(bus) {
       XLSX.utils.book_append_sheet(wb, sheet((bus.news.headlines || []).map(h => ({ score: h.score, title: h.title, source: h.source }))), 'News');
       XLSX.utils.book_append_sheet(wb, sheet((bus.news.congress || []).slice(0, 100)), 'CongressTrades');
       XLSX.utils.book_append_sheet(wb, sheet(bus.state.equityCurve.slice(-500).map(p => ({ time: new Date(p.t).toLocaleString(), equity: p.eq }))), 'EquityCurve');
+      // JOURNAL (#2/#15): each closed trade with its entry votes + exit post-mortem
+      const buys = s.history.filter(h => h.action === 'BUY');
+      const journal = s.history.filter(h => h.action === 'SELL' && h.pnl != null).slice(0, 200).map(sell => {
+        const buy = buys.find(b => b.sym === sell.sym);
+        return { time: sell.t, symbol: sell.sym, ledger: sell.ledger,
+          entryVotes: buy && buy.votes ? buy.votes.join('+') : '', entrySector: buy && buy.cond ? buy.cond.sector : '',
+          entryRegime: buy && buy.cond ? buy.cond.regime : '', netPnl: sell.pnl,
+          outcome: sell.pnl > 0 ? 'WIN' : 'loss', exitReason: sell.why };
+      });
+      XLSX.utils.book_append_sheet(wb, sheet(journal), 'Journal');
+      // SCORECARD (#16): per-agent + per-signal hit rates from the performance monitor
+      const perf = bus.perf || {};
+      const scoreRows = [
+        { metric: 'win rate %', value: perf.winRate ?? '' }, { metric: 'closed trades', value: perf.closed ?? 0 },
+        { metric: 'avg win', value: perf.avgWin ?? '' }, { metric: 'avg loss', value: perf.avgLoss ?? '' },
+        { metric: 'profit factor', value: perf.profitFactor ?? '' }, { metric: 'loss streak', value: perf.streak ?? 0 },
+        {}, { metric: '— PER AGENT —', value: '' },
+        ...(perf.byAgent || []).map(a => ({ metric: 'agent ' + a.agent, value: `${a.rate ?? '?'}% (${a.wins}W/${a.losses}L, pnl ${a.pnl})` })),
+        {}, { metric: '— PER SIGNAL —', value: '' },
+        ...(perf.bySig || []).map(a => ({ metric: 'signal ' + a.sig, value: `${a.rate ?? '?'}% (${a.wins}W/${a.losses}L, pnl ${a.pnl})` })),
+      ];
+      XLSX.utils.book_append_sheet(wb, sheet(scoreRows), 'Scorecard');
       const tmp = XLSX_OUT.replace(/\.xlsx$/, '.tmp.xlsx');
       XLSX.writeFile(wb, tmp);
       fs.renameSync(tmp, XLSX_OUT);
@@ -82,6 +104,7 @@ function start(bus) {
   // when the bot isn't trading (markets closed / no signal). Shows equity, what the bot
   // is watching, market status, mood — proof of life you can open from your phone.
   function heartbeat() {
+    if (bus.beat) bus.beat('logger');
     const s = bus.state;
     const openN = Object.keys(s.t212.positions).length + Object.keys(s.paper.positions).length;
     const equity = bus.t212Status.connected ? +((bus.t212Status.cash || 0) + Object.entries(s.t212.positions)
