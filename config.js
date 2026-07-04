@@ -58,26 +58,42 @@ const PROFILES = {
     name: 'practice', perTradeCap: 0.90, sizeBase: 0.20, sizeSlope: 0.70,
     maxOpen: 10, minConf: 0.55, minHoldMin: 0, preferGBP: false,
     nonGbpPenalty: 0, minNotionalPerMin: 0, stopLoss: 0.018, dailyMaxLoss: 0.06,
-    minNetProfit: 0,
+    minNetProfit: 0, dailyProfitTarget: 0.08,
   },
   real: {
     name: 'real', perTradeCap: 0.25, sizeBase: 0.08, sizeSlope: 0.17,
     maxOpen: 6, minConf: 0.63, minHoldMin: 25, preferGBP: true,
     nonGbpPenalty: 0.04, minNotionalPerMin: 3000, stopLoss: 0.03, dailyMaxLoss: 0.05,
     minNetProfit: 0.008,   // never take profit until gain clears fees + 0.8% NET
+    dailyProfitTarget: 0.03,   // up +3% on the day → bank it, no new entries till tomorrow
   },
 };
 
 // T212 fee/friction model → round-trip cost as a fraction of the position.
 // T212 Invest charges NO stock commission, but a 0.15% FX conversion EACH WAY on any
-// instrument not in the account currency (GBP). London/.L names are GBP → no FX; a
-// small spread buffer is still assumed. Applied only under the 'real' profile — which
-// also runs during real-profile validation on practice, so the P&L you judge is HONEST.
-//   non-GBP: 0.15%×2 FX + ~0.10% spread ≈ 0.40% round-trip
-//   GBP/.L : ~0.15% spread only
-function frictionPct(sym, profile) {
+// instrument not in the account currency (GBP), PLUS the bid/ask spread you cross on
+// the way in and out. Applied only under the 'real' profile — which also runs during
+// real-profile validation on practice, so the P&L you judge is HONEST.
+//   FX (round-trip): 0.15%×2 = 0.30% on non-GBP, 0 on GBP/.L
+//   Spread (round-trip): estimated from liquidity — thin names cost far more to cross.
+function fxPct(sym, profile) {
   if (!profile || profile.name !== 'real') return 0;
-  return /\.L$/.test(String(sym)) ? 0.0015 : 0.0040;
+  return /\.L$/.test(String(sym)) ? 0 : 0.0030;
+}
+function spreadPct(mk, profile) {
+  if (!profile || profile.name !== 'real' || !mk) return 0;
+  const npm = mk.notionalPerMin || 0;     // traded value/min — liquidity proxy
+  if (npm > 5e6) return 0.0004;            // mega-cap: razor spread
+  if (npm > 1e6) return 0.0008;
+  if (npm > 3e5) return 0.0014;
+  if (npm > 5e4) return 0.0026;
+  return 0.0045;                           // thin: wide spread, expensive to cross
+}
+// total round-trip friction (mk optional; falls back to FX + a small default spread)
+function frictionPct(sym, profile, mk) {
+  if (!profile || profile.name !== 'real') return 0;
+  const spread = mk ? spreadPct(mk, profile) : (/\.L$/.test(String(sym)) ? 0.0015 : 0.0010);
+  return fxPct(sym, profile) + spread;
 }
 // Pick the profile: explicit override wins; otherwise any LIVE account or any small
 // pot (< £2,000) gets the conservative profile automatically. So a real £100 account

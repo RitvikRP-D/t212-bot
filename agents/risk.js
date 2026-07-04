@@ -83,7 +83,17 @@ function start(bus) {
     }
 
     const today = new Date().toDateString();
-    if (state.risk.day !== today) { state.risk.day = today; state.risk.dayStart = eq; bus.riskStatus.dayPaused = false; bus.markDirty(); }
+    if (state.risk.day !== today) { state.risk.day = today; state.risk.dayStart = eq; bus.riskStatus.dayPaused = false; bus.riskStatus.dayProfitLock = false; bus.markDirty(); }
+
+    // DAILY PROFIT LOCK-IN — "take the money and go home". Once the day's gain hits the
+    // profile target, stop opening NEW positions (existing winners still ride their
+    // trailing stops) so a good day can't be given back on fresh bets.
+    const dayGain = state.risk.dayStart ? (eq - state.risk.dayStart) / state.risk.dayStart : 0;
+    bus.riskStatus.dayGain = +(dayGain * 100).toFixed(2);
+    if (!bus.riskStatus.dayProfitLock && bus.profile.dailyProfitTarget && dayGain >= bus.profile.dailyProfitTarget) {
+      bus.riskStatus.dayProfitLock = true;
+      incident(`daily profit target hit +${(dayGain * 100).toFixed(1)}% — locked in, no new entries until tomorrow`);
+    }
 
     const floor = state.risk.baseline * (1 - RISK.MAX_DRAWDOWN);
     const dayFloor = (state.risk.dayStart || eq) * (1 - (bus.profile.dailyMaxLoss || RISK.DAILY_MAX_LOSS));
@@ -116,7 +126,7 @@ function start(bus) {
 
   // trader consults these gates before every entry
   bus.riskGate = {
-    canEnter: () => !bus.riskStatus.halted && !bus.riskStatus.dayPaused,
+    canEnter: () => !bus.riskStatus.halted && !bus.riskStatus.dayPaused && !bus.riskStatus.dayProfitLock,
     capInvest: (invest) => {
       const eq = equityNow();
       const cap = (bus.profile && bus.profile.perTradeCap) || RISK.PER_TRADE_CAP;

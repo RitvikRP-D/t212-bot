@@ -9,6 +9,20 @@ const { TRADER_TICK_MS, T212_MIN_ORDER, AUTH_RETRY_MS, MAX_OPEN, marketOpen, fri
 
 function now() { return new Date().toLocaleTimeString(); }
 
+// Pearson correlation of two price series' returns (overlapping tail) — used to avoid
+// stacking positions that move in lockstep. Returns 0 when there's not enough overlap.
+function returnsCorr(a, b) {
+  const n = Math.min(a.length, b.length, 60);
+  if (n < 20) return 0;
+  const ta = a.slice(-n), tb = b.slice(-n), ra = [], rb = [];
+  for (let i = 1; i < n; i++) { ra.push((ta[i] - ta[i - 1]) / ta[i - 1]); rb.push((tb[i] - tb[i - 1]) / tb[i - 1]); }
+  const mean = arr => arr.reduce((x, y) => x + y, 0) / arr.length;
+  const ma = mean(ra), mb = mean(rb);
+  let num = 0, da = 0, db = 0;
+  for (let i = 0; i < ra.length; i++) { const x = ra[i] - ma, y = rb[i] - mb; num += x * y; da += x * x; db += y * y; }
+  return (da > 0 && db > 0) ? num / Math.sqrt(da * db) : 0;
+}
+
 function start(bus) {
   const state = bus.state;
   bus.t212Status = { connected: false, scheme: null, cash: null, total: null, mapped: 0, lastError: 'connecting…', orders: 0, lastAttempt: null };
@@ -197,12 +211,27 @@ function start(bus) {
     }
     // FEE-REACH GATE (real money): if the name is too calm to plausibly move past the
     // fee hurdle (round-trip friction + target net), there's no profit to be had — skip.
-    const entryFriction = frictionPct(sym, prof);
+    const entryFriction = frictionPct(sym, prof, mk);
     if (prof.name === 'real') {
       const reach = (mk.atrPct || 0) * 15;   // rough reachable favorable move over the hold
       if (reach < entryFriction + (prof.minNetProfit || 0)) {
         mk.lastWhy = (mk.lastWhy || '') + ' · ⏸ move too small to beat fees';
         return;
+      }
+      // EARNINGS BLACKOUT: never open a position within 2 days of the company reporting.
+      const ed = bus.earningsInDays ? bus.earningsInDays(sym) : null;
+      if (ed != null && ed <= 2 && ed >= 0) {
+        mk.lastWhy = (mk.lastWhy || '') + ` · ⏸ earnings in ${ed}d — blackout`;
+        return;
+      }
+      // CORRELATION CAP: don't stack a bet that moves in lockstep with something we hold
+      // (that's the same risk twice, not diversification).
+      for (const heldSym of Object.keys(state.t212.positions)) {
+        const hc = bus.market[heldSym] && bus.market[heldSym].closes;
+        if (hc && mk.closes && returnsCorr(mk.closes, hc) > 0.85) {
+          mk.lastWhy = (mk.lastWhy || '') + ` · ⏸ moves in lockstep with ${heldSym}`;
+          return;
+        }
       }
     }
     // SECOND, INDEPENDENT GUARD: the clock can still say "open" on an unlisted exchange
@@ -224,15 +253,23 @@ function start(bus) {
       const qty = +(invest / mk.price).toFixed(4);
       if (qty <= 0) return;
       state.t212.positions[sym] = { t212Ticker: t212Ticker[sym], entry: mk.price, qty, invested: invest, opened: now(), openedAt: Date.now(), peak: mk.price, conf, sigType: ev.sigType, reason: mk.lastWhy, pendingFill: true };
+      // REAL money uses a MARKETABLE LIMIT — priced a hair through the spread so it fills
+      // immediately but can never pay more than +0.3% above mid (caps slippage on 16k names).
+      // PRACTICE uses a plain market order. Falls back to market if the venue rejects the limit.
+      const useLimit = prof.name === 'real';
+      const limitPx = +(mk.price * 1.003).toFixed(mk.price > 50 ? 2 : mk.price > 1 ? 3 : 5);
+      const send = (q) => useLimit ? t212.limitOrder(t212Ticker[sym], q, limitPx) : t212.marketOrder(t212Ticker[sym], q);
       // T212 instruments differ in allowed quantity precision — retry coarser on 400
-      let r = await t212.marketOrder(t212Ticker[sym], qty);
+      let r = await send(qty);
       for (const dp of [2, 1, 0]) {
         if (r.status !== 400 || !/precision/i.test(JSON.stringify(r.body))) break;
         const q2 = +(invest / mk.price).toFixed(dp);
         if (q2 <= 0) break;
         state.t212.positions[sym].qty = q2;
-        r = await t212.marketOrder(t212Ticker[sym], q2);
+        r = await send(q2);
       }
+      // limit rejected for a non-quantity reason (tick size etc.) → fall back to market so the signal still trades
+      if (useLimit && r.status !== 200) r = await t212.marketOrder(t212Ticker[sym], state.t212.positions[sym].qty);
       if (r.status === 200) {
         state.t212.positions[sym].pendingFill = false;
         bus.t212Status.orders++;
@@ -272,9 +309,10 @@ function start(bus) {
       const heldMin = p.openedAt ? (Date.now() - p.openedAt) / 60000 : 999;
       const matured = heldMin >= (prof.minHoldMin || 0);   // min-hold reduces fee-churn on real money
       // FEE HURDLE: gross gain must clear the round-trip friction before it's a REAL profit.
-      const friction = frictionPct(sym, prof);
+      const friction = frictionPct(sym, prof, mk);
       const tpFloor = friction + (prof.minNetProfit || 0);  // don't bank a "profit" that fees would eat
       const netGain = gain - friction;                      // what you actually keep
+      const edx = (prof.name === 'real' && bus.earningsInDays) ? bus.earningsInDays(sym) : null;  // days to earnings
       let stop = -(prof.stopLoss || 0.018), mode = 'stop loss';
       if (mk.atrPct != null && mk.atrPct > 0.0009) { stop = -Math.min(0.04, Math.max(0.012, mk.atrPct * 22)); mode = 'ATR-sized stop'; }
       if (ns >= 0.5 && (mk.rsi == null || mk.rsi < 50)) { stop = -0.06; mode = 'wide stop (positive news, riding dip)'; }
@@ -286,6 +324,7 @@ function start(bus) {
       // capital protection ALWAYS fires (stop loss / trailing / bad news) regardless of hold time;
       // discretionary profit-taking waits until matured AND net-of-fees positive.
       if (gain <= stop) why = stop > 0 ? `${mode}: locked +${(netGain*100).toFixed(2)}% net (peak +${(peakGain*100).toFixed(2)}%)` : `${mode} at ${(gain*100).toFixed(2)}%`;
+      else if (edx != null && edx >= 0 && edx <= 1) why = `earnings in ${edx}d — going flat before the gap (${(netGain*100).toFixed(2)}% net)`;
       else if (ns <= -1.5 && gain > -0.02) why = `bad news flow (${ns}) — exiting at ${(netGain*100).toFixed(2)}% net`;
       else if (matured && gain > tpFloor && mk.rsi != null && mk.rsi > 70 && mk.crossDown) why = `overbought RSI ${mk.rsi.toFixed(1)} — banking +${(netGain*100).toFixed(2)}% net`;
       else if (matured && gain > tpFloor) {
@@ -299,7 +338,7 @@ function start(bus) {
   async function closePos(sym, ledger, book, p, mk, why) {
     const gross = (mk.price - p.entry) * p.qty;
     // subtract estimated round-trip friction (FX + spread) so realized P&L is TRUE net profit
-    const fee = frictionPct(sym, bus.profile) * (p.invested || p.entry * p.qty);
+    const fee = frictionPct(sym, bus.profile, mk) * (p.invested || p.entry * p.qty);
     const pnl = gross - fee;
     if (ledger === 'T212-PRACTICE') {
       p.pendingFill = true;

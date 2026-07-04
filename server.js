@@ -61,11 +61,13 @@ require('./agents/cryptotv').start(bus);    // ⑪ TradingView crypto analyst (m
 require('./agents/history').start(bus);     // ⑭ historian — monthly data back to 1927
 require('./agents/ranker').start(bus);      // ⑮ whole-universe leaderboard
 require('./agents/marketmap').start(bus);   // ⑯ venue air-traffic control
+require('./agents/earnings').start(bus);    // ⑲ earnings blackout calendar (real profile)
 require('./agents/trader').start(bus);      // ③ the trader (T212 practice orders)
 require('./agents/allocator').start(bus);   // ⑰ overnight order queue → fires at the bell
 require('./agents/sentinel').start(bus);    // ⑨ constant checker / auto-repair
 require('./agents/medic').start(bus);       // ⑧ self-healer / fleet supervisor
 require('./agents/logger').start(bus);      // ④ xlsx + csv + Google Sheet
+require('./agents/telegram').start(bus);    // ⑱ phone alerts + kill-switch (after logger: wraps onTrade)
 require('./agents/tradingview').start(bus); // ⑤ optional local TradingView-app bridge
 
 function lanIP() {
@@ -105,6 +107,7 @@ function snapshot() {
     cryptoTV: bus.ctvStatus, commodities: { status: bus.commodStatus, top: commodTop },
     deepNews: { global: (bus.deepNews || {}).global, perTopic: (bus.deepNews || {}).perTopic, sources: (bus.deepNews || {}).sources, updated: (bus.deepNews || {}).updated, headlines: ((bus.deepNews || {}).headlines || []).slice(0, 6) },
     historian: bus.histStatus, ranker: bus.rankStatus, marketMap: bus.marketMap, alloc: bus.allocStatus,
+    earnings: { count: (bus.earnings || {}).count, updated: (bus.earnings || {}).updated }, tg: bus.tgStatus,
     queue: Object.entries(state.queue || {}).map(([sym, q]) => ({ sym, ...q })),
     newsAgent: { updated: bus.news.updated, headlines: (bus.news.headlines || []).length, congress: (bus.news.congress || []).length },
     paperCash: +state.paper.balance.toFixed(2),
@@ -140,6 +143,19 @@ const server = http.createServer((req, res) => {
     state.pause = !state.pause; bus.markDirty();
     res.writeHead(200, { 'Content-Type': 'application/json', ...cors });
     return res.end(JSON.stringify({ pause: state.pause }));
+  }
+  if (req.url === '/api/resume' && req.method === 'POST') {
+    state.pause = false; bus.markDirty();
+    res.writeHead(200, { 'Content-Type': 'application/json', ...cors });
+    return res.end(JSON.stringify({ pause: false }));
+  }
+  // KILL SWITCH — pause + liquidate everything at market, from the dashboard or phone
+  if (req.url === '/api/kill' && req.method === 'POST') {
+    state.pause = true; bus.markDirty();
+    if (bus.liquidateAll) bus.liquidateAll('manual kill switch (dashboard)');
+    if (bus.notify) bus.notify('🛑 KILL switch pressed on dashboard — liquidating + paused.');
+    res.writeHead(200, { 'Content-Type': 'application/json', ...cors });
+    return res.end(JSON.stringify({ killed: true, paused: true }));
   }
   res.writeHead(404, cors); res.end('not found');
 });
