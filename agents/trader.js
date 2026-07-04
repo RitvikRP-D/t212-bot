@@ -197,6 +197,13 @@ function start(bus) {
     // FEE-AWARE NUDGE: on a real GBP account, non-GBP names cost ~0.15%/side in FX —
     // dock their confidence so fee-free LSE (.L) names win ties.
     if (prof.nonGbpPenalty && !/\.L$/.test(sym)) conf = Math.max(0, conf - prof.nonGbpPenalty);
+    // PINE SMITH (agent ⑳): fold the broadcast multi-indicator confluence in as a small,
+    // bounded confirmation (±0.02 — same weight as the fee nudge; never an override).
+    if (bus.pine && bus.pine[sym]) {
+      const p = bus.pine[sym];
+      conf = Math.max(0, Math.min(1, conf + Math.max(-0.02, Math.min(0.02, p.bias * 0.02))));
+      tvNote += ` · Pine ${p.net >= 0 ? '+' : ''}${p.net} confluence`;
+    }
     mk.lastConf = +conf.toFixed(2);
     mk.lastWhy = ev.reasons.join(' · ') + (lm !== 1 ? ` · learning ×${lm.toFixed(2)}` : '') + tvNote + (prof.name === 'real' ? ' · [real profile]' : '');
     // EVERY instrument on T212 is exchange-listed (crypto ETPs & commodity ETCs trade on

@@ -62,6 +62,7 @@ require('./agents/history').start(bus);     // ⑭ historian — monthly data ba
 require('./agents/ranker').start(bus);      // ⑮ whole-universe leaderboard
 require('./agents/marketmap').start(bus);   // ⑯ venue air-traffic control
 require('./agents/earnings').start(bus);    // ⑲ earnings blackout calendar (real profile)
+require('./agents/pine').start(bus);        // ⑳ Pine Smith — Pine v5 per stock, broadcasts confluence
 require('./agents/trader').start(bus);      // ③ the trader (T212 practice orders)
 require('./agents/allocator').start(bus);   // ⑰ overnight order queue → fires at the bell
 require('./agents/sentinel').start(bus);    // ⑨ constant checker / auto-repair
@@ -108,6 +109,7 @@ function snapshot() {
     deepNews: { global: (bus.deepNews || {}).global, perTopic: (bus.deepNews || {}).perTopic, sources: (bus.deepNews || {}).sources, updated: (bus.deepNews || {}).updated, headlines: ((bus.deepNews || {}).headlines || []).slice(0, 6) },
     historian: bus.histStatus, ranker: bus.rankStatus, marketMap: bus.marketMap, alloc: bus.allocStatus,
     earnings: { count: (bus.earnings || {}).count, updated: (bus.earnings || {}).updated }, alerts: bus.alertStatus,
+    pine: bus.pineStatus,
     queue: Object.entries(state.queue || {}).map(([sym, q]) => ({ sym, ...q })),
     newsAgent: { updated: bus.news.updated, headlines: (bus.news.headlines || []).length, congress: (bus.news.congress || []).length },
     paperCash: +state.paper.balance.toFixed(2),
@@ -138,6 +140,19 @@ const server = http.createServer((req, res) => {
     const iv = setInterval(() => { try { res.write('data: ' + JSON.stringify(snapshot()) + '\n\n'); } catch (e) {} }, 900);
     req.on('close', () => clearInterval(iv));
     return;
+  }
+  // PINE SMITH: list broadcast signals, or fetch one symbol's full Pine v5 script to paste into TradingView
+  if (req.url.startsWith('/api/pine')) {
+    const q = new URL(req.url, 'http://x').searchParams.get('sym');
+    if (q) {
+      const sym = q.toUpperCase();
+      const script = bus.pineScript ? bus.pineScript(sym) : null;
+      if (!script) { res.writeHead(404, { 'Content-Type': 'text/plain', ...cors }); return res.end(`no Pine script for ${sym} (not currently analysed)`); }
+      res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8', ...cors });
+      return res.end(script);
+    }
+    res.writeHead(200, { 'Content-Type': 'application/json', ...cors });
+    return res.end(JSON.stringify({ status: bus.pineStatus, signals: bus.pine || {} }));
   }
   if (req.url === '/api/pause' && req.method === 'POST') {
     state.pause = !state.pause; bus.markDirty();
