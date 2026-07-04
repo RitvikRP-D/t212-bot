@@ -75,7 +75,7 @@ function start(bus) {
         // only update if we have new/changed data
         if (universe.length > 0 && universe.length !== bus.universe.length) {
           bus.universe = universe;
-          t212Ticker = {};  // rebuild from fresh data
+          for (const k of Object.keys(t212Ticker)) delete t212Ticker[k];  // clear in place — t212Ticker is const
           for (const u of universe) t212Ticker[u.y] = u.t212;
           console.log(`[t212] universe refreshed to ${universe.length} instruments (${skipped} unmappable skipped)`);
           bus.t212Status.mapped = Object.keys(t212Ticker).length;
