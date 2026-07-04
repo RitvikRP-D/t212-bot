@@ -22,9 +22,16 @@ function doPost(e) {
   if (!sheet) {
     sheet = ss.insertSheet(tabName);
     if (tabName === 'Trades') sheet.appendRow(['Time','Ledger','Symbol','Action','Price','Qty','P&L','Reason']);
-    else sheet.appendRow(['Time','Mode','Cash','Realized P&L','Open Positions','Closed Trades']);
+    else sheet.appendRow(['Time','Mode','Equity','Cash','Realized P&L','Open','Closed','Universe','MktsOpen','TopSignal','NewsMood','Fear&Greed','Congress','Status']);
   }
   sheet.appendRow(data.row);
-  return ContentService.createTextOutput(JSON.stringify({ok: true}))
+  return ContentService.createTextOutput(JSON.stringify({ok: true, sheet: ss.getUrl()}))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+// Open the webhook URL in a browser to see WHICH sheet it writes to (never lose the link).
+function doGet(e) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  return ContentService.createTextOutput(JSON.stringify({ ok: true, sheet: ss.getUrl(), name: ss.getName() }))
     .setMimeType(ContentService.MimeType.JSON);
 }

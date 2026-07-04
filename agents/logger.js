@@ -78,14 +78,38 @@ function start(bus) {
   setTimeout(writeXlsx, 10000);
   setInterval(writeXlsx, LOGGER_MS);
 
-  // summary row to Google Sheet every 5 min
-  setInterval(() => {
+  // Rich LIVE heartbeat to Google Sheet — frequent so the sheet visibly updates even
+  // when the bot isn't trading (markets closed / no signal). Shows equity, what the bot
+  // is watching, market status, mood — proof of life you can open from your phone.
+  function heartbeat() {
     const s = bus.state;
-    postSheet('summary', [new Date().toLocaleString(), bus.t212Status.connected ? 'T212 connected' : 'internal ledger',
-      bus.t212Status.cash ?? s.paper.balance, +s.realized.toFixed(2),
-      Object.keys(s.t212.positions).length + Object.keys(s.paper.positions).length,
-      s.history.filter(h => h.pnl != null).length]);
-  }, 300000);
-  console.log('[logger] agent started → xlsx + csv' + (process.env.GSHEET_WEBHOOK ? ' + Google Sheet' : ' (Google Sheet: set GSHEET_WEBHOOK in .env)'));
+    const openN = Object.keys(s.t212.positions).length + Object.keys(s.paper.positions).length;
+    const equity = bus.t212Status.connected ? +((bus.t212Status.cash || 0) + Object.entries(s.t212.positions)
+      .reduce((a, [sym, p]) => a + (bus.market[sym]?.price || p.entry) * p.qty, 0)).toFixed(2) : +s.paper.balance.toFixed(2);
+    // best current read across the whole universe
+    const top = Object.entries(bus.market).filter(([, m]) => (m.lastConf || 0) > 0)
+      .sort((a, b) => (b[1].lastConf || 0) - (a[1].lastConf || 0))[0];
+    const topSig = top ? `${top[0]} ${(top[1].lastConf * 100).toFixed(0)}%` : '—';
+    const cg = bus.news.congressTop && bus.news.congressTop[0];
+    postSheet('summary', [
+      new Date().toLocaleString(),
+      bus.t212Status.connected ? 'T212 practice' : 'internal ledger',
+      equity,
+      bus.t212Status.cash ?? +s.paper.balance.toFixed(2),
+      +s.realized.toFixed(2),
+      openN,
+      s.history.filter(h => h.pnl != null).length,
+      bus.universe.length,
+      bus.scanStatus?.openNow ?? 0,
+      topSig,
+      bus.news.global ?? '',
+      bus.news.fng ? `${bus.news.fng.value} ${bus.news.fng.label}` : '',
+      cg ? `congress: ${cg.ticker} ${cg.val.toFixed(2)}` : '',
+      bus.risk?.halted ? 'HALTED' : 'live',
+    ]);
+  }
+  setTimeout(heartbeat, 8000);       // first beat shortly after boot
+  setInterval(heartbeat, 120000);    // then every 2 minutes
+  console.log('[logger] agent started → xlsx + csv' + (process.env.GSHEET_WEBHOOK ? ' + Google Sheet (2-min live heartbeat)' : ' (Google Sheet: set GSHEET_WEBHOOK in .env)'));
 }
 module.exports = { start };
