@@ -11,8 +11,9 @@ const PROXIES = ['SPY', 'QQQ', 'AAPL', 'MSFT', 'NVDA', 'IWM', 'DIA', 'AMZN', 'ME
 function stdev(a) { if (a.length < 2) return 0; const m = a.reduce((x, y) => x + y, 0) / a.length; return Math.sqrt(a.reduce((x, y) => x + (y - m) ** 2, 0) / a.length); }
 
 function start(bus) {
-  bus.regime = { state: 'unknown', vol: 0, volRatio: 1, mult: { conf: 1, size: 1, stop: 1 }, breadth: 0, updated: null };
+  bus.regime = { state: 'unknown', vol: 0, volRatio: 1, mult: { conf: 1, size: 1, stop: 1 }, breadth: 0, updated: null, stateChanged: false };
   let volHist = [];   // rolling recent realized-vol readings to compare against
+  let prevState = 'unknown';   // #new⑤: track for regime shift detection
 
   function cycle() {
     if (bus.beat) bus.beat('regime');   // loop is alive even when markets are closed / no data yet
@@ -46,7 +47,12 @@ function start(bus) {
       : stateNow === 'chop' ? { conf: 0.9, size: 0.8, stop: 0.85 }
         : { conf: 0.0, size: 0.5, stop: 0.8 };          // shock: conf×0 blocks new entries
 
-    bus.regime = { state: stateNow, vol: +(vol * 100).toFixed(3), volRatio: +volRatio.toFixed(2), mult, breadth: +breadth.toFixed(2), trendFrac: +trendFrac.toFixed(2), updated: new Date().toLocaleTimeString() };
+    // #new⑤: INTRA-DAY REGIME SHIFT DETECTION — if state flips, tighten all open stops
+    const stateChanged = stateNow !== prevState && prevState !== 'unknown';
+    if (stateChanged) console.log(`[regime] SHIFT ${prevState} → ${stateNow} — tightening all open stops`);
+    prevState = stateNow;
+
+    bus.regime = { state: stateNow, vol: +(vol * 100).toFixed(3), volRatio: +volRatio.toFixed(2), mult, breadth: +breadth.toFixed(2), trendFrac: +trendFrac.toFixed(2), updated: new Date().toLocaleTimeString(), stateChanged };
   }
   setInterval(cycle, 20e3);
   setTimeout(cycle, 12e3);

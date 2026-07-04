@@ -67,23 +67,25 @@ function start(bus) {
     } catch (e) { console.log('[t212] cache load failed: ' + e.message); }
   }
   async function expandUniverse() {
-    if (bus.universe.length > 1000) return; // already expanded
+    // always attempt periodic refresh — don't skip based on prior universe size, since mappings can stale/change
     try {
       const inst = await t212.instruments();
       if (inst.status === 200 && Array.isArray(inst.body)) {
         const { universe, skipped } = fromInstruments(inst.body);
-        if (universe.length > bus.universe.length) {
+        // only update if we have new/changed data
+        if (universe.length > 0 && universe.length !== bus.universe.length) {
           bus.universe = universe;
+          t212Ticker = {};  // rebuild from fresh data
           for (const u of universe) t212Ticker[u.y] = u.t212;
-          console.log(`[t212] universe expanded to ${universe.length} instruments from your practice account (${skipped} unmappable skipped)`);
+          console.log(`[t212] universe refreshed to ${universe.length} instruments (${skipped} unmappable skipped)`);
+          bus.t212Status.mapped = Object.keys(t212Ticker).length;
+          // refresh the on-disk cache
+          try { require('fs').writeFileSync(CACHE_FILE, JSON.stringify(inst.body)); } catch (e) {}
         }
-        bus.t212Status.mapped = Object.keys(t212Ticker).length;
-        // refresh the on-disk cache so restarts are instant
-        try { require('fs').writeFileSync(CACHE_FILE, JSON.stringify(inst.body)); } catch (e) {}
       } else {
-        console.log('[t212] instruments fetch HTTP ' + inst.status + ' — using cache, will retry');
+        console.log('[t212] instruments fetch HTTP ' + inst.status + ' — cache in use, will retry');
       }
-    } catch (e) { console.log('[t212] instruments fetch failed — using cache, will retry: ' + e.message); }
+    } catch (e) { console.log('[t212] instruments fetch failed — cache in use, will retry: ' + e.message); }
   }
   loadFromCache();   // instant 16k universe from disk — no API dependency
   tryConnect();
@@ -100,13 +102,19 @@ function start(bus) {
       }
       const p = await t212.portfolio();
       if (p.status === 200 && Array.isArray(p.body)) {
+        if (bus.recordTrade) bus.recordTrade();  // reconcile succeeded; bot is alive
         const seen = new Set();
         const rev = {};
         for (const [y, t] of Object.entries(t212Ticker)) rev[t] = y;
         for (const pos of p.body) {
           seen.add(pos.ticker);
           const local = Object.values(state.t212.positions).find(x => x.t212Ticker === pos.ticker);
-          if (local) { local.qty = pos.quantity; local.entry = pos.averagePrice; continue; }
+          if (local) {
+            local.qty = pos.quantity;  // sync with real fill
+            local.entry = pos.averagePrice;
+            local.pendingFill = false;  // fill is now confirmed, safe to exit
+            continue;
+          }
           // position exists on T212 but not locally (fresh cloud run / lost state) — adopt it so exits keep working
           const sym = rev[pos.ticker];
           if (sym) {
@@ -206,8 +214,11 @@ function start(bus) {
       tvNote += ` · Pine ${p.net >= 0 ? '+' : ''}${p.net} confluence`;
     }
 
-    // ——— CONSENSUS VOTES (#1) — which independent agents back this entry ———
-    const votes = ['signal'];
+    // ——— CONSENSUS VOTES (#1/#6fix) — which independent agents back this entry ———
+    // #6fix: signal vote is now optional (enable if feature flag, or always for practice)
+    const votes = [];
+    const useSignalVote = prof.name === 'practice' || (process.env.CONSENSUS_REQUIRE_SIGNAL !== 'false');
+    if (useSignalVote) votes.push('signal');
     if (tvr && Date.now() - tvr.at < 30 * 60e3 && tvr.rec > 0.15) votes.push('tv');
     if (lt && Date.now() - lt.at < 25 * 3600e3 && lt.regime > 0) votes.push('historian');
     if (bus.rankTop && bus.rankTop.has(sym)) votes.push('ranker');
@@ -215,6 +226,16 @@ function start(bus) {
     if (senti > 0.2) votes.push('news');
     if (bus.news.congressBoost && bus.news.congressBoost[sym.split('.')[0]] > 0) votes.push('congress');
     if ((mk.volSurge || 0) > 1.8) votes.push('volume');
+    // NEWS BRAIN vote + bounded confidence nudge (agents 🅐🅑🅒): interpreted, history-grounded
+    // news lean. Adds a consensus vote when clearly positive, docks conf when clearly negative.
+    if (bus.newsBridge && bus.newsBridge.signal) {
+      const nb = bus.newsBridge.signal[sym];
+      if (nb != null) {
+        conf = Math.max(0, Math.min(1, conf + Math.max(-0.08, Math.min(0.08, nb * 0.08))));
+        if (bus.newsBridge.vote(sym)) { votes.push('newsbrain'); tvNote += ` · news-brain +${nb.toFixed(2)}`; }
+        else if (nb < -0.4) tvNote += ` · news-brain ${nb.toFixed(2)} (caution)`;
+      }
+    }
     mk.lastVotes = votes;
 
     // ——— ENTRY TIMING (#8) — don't catch a falling knife on reversal setups ———
@@ -236,6 +257,23 @@ function start(bus) {
     // ——— DRAWDOWN RECOVERY (#4) — below baseline but above the hard floor: trade smaller/pickier ———
     const recovering = bus.riskStatus && bus.riskStatus.recovery;
     if (recovering) { conf *= 0.9; tvNote += ' · recovery mode'; }
+
+    // #new⑥: ANTI-CORRELATION BONUS — if new candidate is negatively correlated with holdings,
+    // boost confidence (actively reward hedging). Don't apply if we have no holdings.
+    const heldPositions = Object.keys(state.t212.positions);
+    if (heldPositions.length > 0 && mk.closes) {
+      for (const heldSym of heldPositions) {
+        const hc = bus.market[heldSym] && bus.market[heldSym].closes;
+        if (hc) {
+          const corr = returnsCorr(mk.closes, hc);
+          if (corr < -0.5) {
+            conf = Math.min(1, conf + 0.1);   // boost by 0.1 (capped at 1.0)
+            tvNote += ` · hedges ${heldSym} (corr ${corr.toFixed(2)})`;
+            break;   // only one boost per entry, even if it hedges multiple
+          }
+        }
+      }
+    }
 
     conf = Math.max(0, Math.min(1, conf));
     mk.lastConf = +conf.toFixed(2);
@@ -264,6 +302,7 @@ function start(bus) {
         return;
       }
       // EARNINGS BLACKOUT: never open a position within 2 days of the company reporting.
+      // #5fix: now applies to both profiles (practice can test earnings risk)
       const ed = bus.earningsInDays ? bus.earningsInDays(sym) : null;
       if (ed != null && ed <= 2 && ed >= 0) {
         mk.lastWhy = (mk.lastWhy || '') + ` · ⏸ earnings in ${ed}d — blackout`;
@@ -278,17 +317,20 @@ function start(bus) {
           return;
         }
       }
-      // SECTOR / COUNTRY DIVERSIFICATION CAP (#6): don't let the book pile into one theme.
+      // SECTOR / COUNTRY DIVERSIFICATION CAP (#6/#3fix): don't let the book pile into one theme.
+      // #3fix: explicit defaults for undefined caps (1.0 = no cap)
       const held = Object.keys(state.t212.positions);
       if (held.length >= 2) {
         const afterN = held.length + 1;
         const sec = sectorOf(sym), cty = countryOf(sym);
+        const sectorCap = prof.sectorCap != null ? prof.sectorCap : 1.0;  // #3fix: default to 1.0 (no cap)
+        const countryCap = prof.countryCap != null ? prof.countryCap : 1.0;
         if (sec !== 'index' && sec !== 'other') {
           const sameSec = held.filter(h => sectorOf(h) === sec).length + 1;
-          if (sameSec / afterN > prof.sectorCap) { mk.lastWhy = (mk.lastWhy || '') + ` · ⏸ ${sec} already ${Math.round(sameSec / afterN * 100)}% of book`; return; }
+          if (sameSec / afterN > sectorCap) { mk.lastWhy = (mk.lastWhy || '') + ` · ⏸ ${sec} already ${Math.round(sameSec / afterN * 100)}% of book`; return; }
         }
         const sameCty = held.filter(h => countryOf(h) === cty).length + 1;
-        if (sameCty / afterN > prof.countryCap) { mk.lastWhy = (mk.lastWhy || '') + ` · ⏸ ${cty} already ${Math.round(sameCty / afterN * 100)}% of book`; return; }
+        if (sameCty / afterN > countryCap) { mk.lastWhy = (mk.lastWhy || '') + ` · ⏸ ${cty} already ${Math.round(sameCty / afterN * 100)}% of book`; return; }
       }
     }
     // SECOND, INDEPENDENT GUARD: the clock can still say "open" on an unlisted exchange
@@ -302,7 +344,13 @@ function start(bus) {
     if (t212.connected() && t212Ticker[sym]) {
       if (state.t212.positions[sym]) return;
       const cash = bus.t212Status.cash || 0;
-      const sizeMul = (reg && reg.mult ? reg.mult.size : 1) * (recovering ? 0.5 : 1);   // regime + recovery shrink size
+      // #new②: VOLATILITY-ADJUSTED SIZING — scale position size inverse to realized vol
+      let volMul = 1;
+      if (prof.volAdjustedSizing && bus.regime && bus.regime.volRatio > 0) {
+        // high vol (volRatio > 1.0) → smaller size; low vol (volRatio < 1.0) → normal/larger size
+        volMul = Math.max(0.5, Math.min(1.2, 1 / (bus.regime.volRatio || 1)));   // capped between 0.5× and 1.2×
+      }
+      const sizeMul = (reg && reg.mult ? reg.mult.size : 1) * (recovering ? 0.5 : 1) * volMul;   // regime + recovery + vol shrink size
       const frac = Math.min(prof.perTradeCap, (prof.sizeBase + conf * prof.sizeSlope) * sizeMul);
       const reserve = Math.max(2, cash * 0.02);          // keep a small cash reserve for fees/slippage
       let invest = Math.min(cash * frac, cash - reserve);
@@ -329,11 +377,14 @@ function start(bus) {
       // limit rejected for a non-quantity reason (tick size etc.) → fall back to market so the signal still trades
       if (useLimit && r.status !== 200) r = await t212.marketOrder(t212Ticker[sym], state.t212.positions[sym].qty);
       if (r.status === 200) {
-        state.t212.positions[sym].pendingFill = false;
+        // Order accepted, but keep pendingFill=true until we verify the actual filled quantity via reconcile/orders check
+        // This prevents exitCheck from firing a stop-loss in the window where qty is stale (partial fill scenario)
         bus.t212Status.orders++;
         bus.t212Status.cash = Math.max(0, cash - invest);
         pushHist({ t: now(), sym, ledger: 'T212-PRACTICE', action: 'BUY', price: mk.price, qty: state.t212.positions[sym].qty, pnl: null, votes, cond: { rsi: mk.rsi != null ? +mk.rsi.toFixed(1) : null, regime: reg ? reg.state : null, sector: sectorOf(sym), atrPct: mk.atrPct }, why: `${mk.lastWhy} — conf ${(conf*100).toFixed(0)}%, votes[${votes.join(',')}], ~${invest.toFixed(2)} → REAL order on practice account (check your T212 app)` });
-        console.log(`[trade] T212 BUY ${t212Ticker[sym]} qty=${state.t212.positions[sym].qty}`);
+        console.log(`[trade] T212 BUY ${t212Ticker[sym]} qty=${state.t212.positions[sym].qty} (awaiting fill confirmation)`);
+        if (bus.recordTrade) bus.recordTrade();  // signal health heartbeat: bot is alive
+        // pendingFill stays true; reconcile() will verify actual fill and update qty, then it's safe to trade
       } else {
         delete state.t212.positions[sym];
         bus.t212Status.lastError = `order rejected HTTP ${r.status}: ${JSON.stringify(r.body).slice(0, 140)}`;
@@ -390,18 +441,23 @@ function start(bus) {
         if (!p.ladder1 && gain >= rDist * 1.0) { p.ladder1 = true; scaleOut(sym, book, p, mk, 1 / 3, `ladder +1R — banked ⅓ (+${(netGain*100).toFixed(2)}% net)`); return; }
         if (p.ladder1 && !p.ladder2 && gain >= rDist * 1.5) { p.ladder2 = true; scaleOut(sym, book, p, mk, 0.5, `ladder +1.5R — banked another ⅓`); return; }
       }
-      const mtc = ((bus.profile || {}).name === 'real') ? minsToClose(sym) : null;   // minutes to venue close
+      const mtcReal = minsToClose(sym);   // #1fix: both profiles now check time to close
+      const minProfitGate = prof.overnightMinProfit || 0.001;  // #2fix: min profit to hold overnight
       let why = null;
       // capital protection ALWAYS fires (stop loss / trailing / bad news) regardless of hold time;
       // discretionary profit-taking waits until matured AND net-of-fees positive.
       if (gain <= stop) why = stop > 0 ? `${mode}: locked +${(netGain*100).toFixed(2)}% net (peak +${(peakGain*100).toFixed(2)}%)` : `${mode} at ${(gain*100).toFixed(2)}%`;
-      else if (edx != null && edx >= 0 && edx <= 1) why = `earnings in ${edx}d — going flat before the gap (${(netGain*100).toFixed(2)}% net)`;
+      else if (edx != null && edx >= 0 && edx <= 1 && !prof.earningsSmart) why = `earnings in ${edx}d — going flat before the gap (${(netGain*100).toFixed(2)}% net)`;
       else if (ns <= -1.5 && gain > -0.02) why = `bad news flow (${ns}) — exiting at ${(netGain*100).toFixed(2)}% net`;
-      // OVERNIGHT HOLD DECISION (#20): near the close, only carry a green, non-earnings winner
+      // #new①: EARNINGS SMART-EXIT — close early if report is today/tomorrow (instead of waiting for the gap)
+      else if (prof.earningsSmart && edx != null && edx >= 0 && edx <= 1) why = `earnings in ${edx}d — closing early to avoid the gap (${(netGain*100).toFixed(2)}% net)`;
+      // OVERNIGHT HOLD DECISION (#20/#1fix/#2fix): near the close, only carry a green, non-earnings winner
       // in a trending tape (with its stop tightened); otherwise flatten to dodge the gap.
-      else if (mtc != null && mtc <= 12) {
-        if (netGain <= 0.001) why = `flat before the close — not carrying a red position overnight (${(netGain*100).toFixed(2)}%)`;
-        else if (!(bus.profile || {}).overnightHold) why = `banking +${(netGain*100).toFixed(2)}% net before the close`;
+      // #1fix: both profiles can now test overnight holding (removed real-only gate)
+      // #2fix: require min profit before holding (prof.overnightMinProfit)
+      else if (mtcReal != null && mtcReal <= 12) {
+        if (netGain <= minProfitGate) why = `flat before the close — not carrying a thin position overnight (${(netGain*100).toFixed(2)}% < ${(minProfitGate*100).toFixed(2)}%)`;
+        else if (!(prof || {}).overnightHold) why = `banking +${(netGain*100).toFixed(2)}% net before the close`;
         else if (bus.regime && bus.regime.state === 'trend' && matured) { p.overnightLock = true; }   // hold, protected
         else why = `banking +${(netGain*100).toFixed(2)}% net before the close (no trend to carry)`;
       }
@@ -424,6 +480,7 @@ function start(bus) {
       const r = await t212.marketOrder(p.t212Ticker, -p.qty);
       if (r.status !== 200) { p.pendingFill = false; bus.t212Status.lastError = `sell rejected HTTP ${r.status}`; return; }
       bus.t212Status.orders++;
+      if (bus.recordTrade) bus.recordTrade();  // successful sell; bot is alive
       delete book[sym];
     } else {
       state.paper.balance += p.qty * mk.price;

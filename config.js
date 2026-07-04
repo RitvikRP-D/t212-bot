@@ -69,7 +69,10 @@ const PROFILES = {
     nonGbpPenalty: 0, minNotionalPerMin: 0, stopLoss: 0.018, dailyMaxLoss: 0.06,
     minNetProfit: 0, dailyProfitTarget: 0.08,
     consensusMin: 1, sectorCap: 1.0, countryCap: 1.0, ladder: false,
-    recoveryTrigger: 0.06, overnightHold: false,
+    recoveryTrigger: 0.06, overnightHold: true,   // #1 fix: enable overnight hold on practice too
+    overnightMinProfit: 0.001,  // #2 fix: don't hold unless gain > 0.1% net (beats fees)
+    volAdjustedSizing: false,   // #new②: scale position size inverse to realized vol
+    sentimentDecay: false,      // #new④: weight headlines by age
   },
   real: {
     name: 'real', perTradeCap: 0.25, sizeBase: 0.08, sizeSlope: 0.17,
@@ -83,6 +86,10 @@ const PROFILES = {
     ladder: true,          // scale out in thirds at +1R / +1.5R / target
     recoveryTrigger: 0.04, // >4% below baseline (but above the 10% hard floor) → recovery mode
     overnightHold: true,   // may hold a green, non-earnings position through the close
+    overnightMinProfit: 0.005,  // #2 fix: require 0.5% net to hold overnight (real avoids thin profits)
+    volAdjustedSizing: true,    // #new②: scale position size inverse to realized vol
+    sentimentDecay: true,       // #new④: weight headlines by age
+    earningsSmart: true,        // #new①: close positions before earnings report
   },
 };
 // A/B VARIANT — run a second demo instance with VARIANT=b to test a tweak against the

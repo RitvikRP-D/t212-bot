@@ -3,7 +3,7 @@
 // Scoring now runs through lib/sentiment (weighted, negation-aware, source-weighted).
 // Congress boost is recency-decayed, trade-size weighted and cluster-aware.
 const { NEWS_MS, CONGRESS_MS } = require('../config');
-const { scoreHeadline, amountWeight } = require('../lib/sentiment');
+const { scoreHeadline, scoreAll, amountWeight } = require('../lib/sentiment');
 const { fetchHeadlines } = require('../lib/feeds');
 
 function start(bus) {
@@ -28,11 +28,17 @@ function start(bus) {
       ['https://news.google.com/rss/search?q=upgrade+OR+downgrade+analyst+price+target+when:1d&hl=en-US', 'GoogleNews'],
     ];
     let ok = 0;
+    const fetchTime = Date.now();
     for (const [u, s] of feeds) { try { const h = await fetchHeadlines(u, s); if (h.length) ok++; heads.push(...h); } catch (e) {} }
     bus.news.feedsOk = ok;
     if (!heads.length) return;
-    for (const h of heads) h.score = scoreHeadline(h.title, h.source);
+    // #new④: populate ageHours on each headline (assume fresh if no pubTime)
+    for (const h of heads) h.ageHours = h.pubTime ? (fetchTime - h.pubTime) / 3600000 : 0;
     bus.news.headlines = heads;
+    // #new④: use decay for real profile (older news matters less)
+    const useDecay = bus.profile && bus.profile.name === 'real' && bus.profile.sentimentDecay;
+    // score all headlines (scoreAll mutates h.score + applies decay)
+    scoreAll(heads, useDecay);
     // global mood weighted toward stronger-conviction headlines
     const strong = heads.filter(h => Math.abs(h.score) > 0.3);
     bus.news.global = +((strong.length ? strong : heads).reduce((a, h) => a + h.score, 0) / (strong.length || heads.length)).toFixed(2);
@@ -47,7 +53,10 @@ function start(bus) {
       }
       if (!re) continue;
       const rel = heads.filter(h => re.test(h.title));
-      if (rel.length) perKey[u.y] = +(rel.reduce((a, h) => a + h.score, 0) / rel.length).toFixed(2);
+      if (rel.length) {
+        scoreAll(rel, useDecay);   // #new④: apply decay to per-symbol headlines too (re-scores)
+        perKey[u.y] = +(rel.reduce((a, h) => a + h.score, 0) / rel.length).toFixed(2);
+      }
     }
     bus.news.perKey = perKey;
     bus.news.updated = new Date().toLocaleTimeString();

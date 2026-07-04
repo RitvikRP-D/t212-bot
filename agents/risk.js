@@ -49,6 +49,18 @@ function start(bus) {
     if (bus.beat) bus.beat('risk');
     const eq = equityNow();
     if (eq == null || !isFinite(eq) || eq <= 0) return;
+
+    // SAFETY: detect account switch (practice→real or real→practice)
+    // If baseline was set with a very different equity, something changed
+    if (state.risk.baseline && eq) {
+      const ratio = eq / state.risk.baseline;
+      if (ratio < 0.1 || ratio > 10) {
+        // 10× difference = almost certainly switched accounts
+        incident(`⚠️ ACCOUNT MISMATCH DETECTED: baseline was £${state.risk.baseline.toFixed(2)}, but equity is now £${eq.toFixed(2)} — you may have switched from practice to real. Clear your state before live trading!`);
+        if (bus.notify) bus.notify(`🚨 ACCOUNT SWITCH DETECTED: If you just switched to real money, STOP and clear state.json baseline + history first!`);
+      }
+    }
+
     // select the active trading profile from live-ness + account size (every agent reads bus.profile)
     bus.profile = activeProfile(eq, t212.isLive());
     bus.riskStatus.profile = bus.profile.name;
@@ -68,20 +80,33 @@ function start(bus) {
     // realised a matching loss, it isn't a drawdown — it's the account itself changing.
     // Re-baseline instead of false-halting. A genuine trading loss (open positions or a
     // real negative realised P&L) is untouched and still halts correctly.
-    if (state.risk.baseline) {
-      const noPositions = Object.keys(state.t212.positions).length === 0;
-      const notFromTrading = Math.abs(state.realized || 0) < state.risk.baseline * 0.02;
-      const bigDivergence = Math.abs(eq - state.risk.baseline) > state.risk.baseline * 0.15;
-      if (noPositions && notFromTrading && bigDivergence) {
-        incident(`re-baseline ${state.risk.baseline.toFixed(2)} → ${eq.toFixed(2)}: no positions, no trading loss — account funding/reset/switch detected, halt cleared`);
+    // ACCOUNT FUNDING DETECTION: treat large equity jumps unexplained by trading as external cash flow
+    // (deposits/withdrawals), then rebase both baseline and dayStart proportionally so risk floor
+    // and daily profit-lock aren't poisoned by the user's own cash moves — regardless of whether
+    // positions are open. Detect by: equity changed, but no matching realized P&L.
+    if (state.risk.baseline && eq != null && isFinite(eq)) {
+      const eqDelta = eq - state.risk.baseline;
+      const realizedDelta = (state.realized || 0) - (state.risk.lastRealizedSnapshot || 0);
+      const unexplainedDelta = Math.abs(eqDelta - realizedDelta);
+      const isLargeUnexplainedJump = unexplainedDelta > state.risk.baseline * 0.08;  // >8% unexplained = external cash
+      if (isLargeUnexplainedJump && Math.abs(state.realized || 0) < state.risk.baseline * 0.02) {
+        // external funding detected: adjust baseline and dayStart by the residual
+        incident(`re-baseline ${state.risk.baseline.toFixed(2)} → ${eq.toFixed(2)}: external cash flow detected (+${(unexplainedDelta/state.risk.baseline*100).toFixed(0)}%), adjusting floor`);
+        const scaleFactor = eq / state.risk.baseline;
         state.risk.baseline = +eq.toFixed(2);
-        state.risk.halted = false; bus.riskStatus.halted = false;
-        state.risk.haltReason = null; bus.riskStatus.haltReason = null;
-        state.pause = false;
-        state.risk.day = null;   // force a fresh day-start below
+        if (state.risk.dayStart) state.risk.dayStart = +(state.risk.dayStart * scaleFactor).toFixed(2);
+        state.risk.lastRealizedSnapshot = state.realized || 0;
+        if (bus.riskStatus.halted) {
+          state.risk.halted = false;
+          bus.riskStatus.halted = false;
+          state.risk.haltReason = null;
+          bus.riskStatus.haltReason = null;
+          state.pause = false;
+        }
         bus.markDirty();
       }
     }
+    state.risk.lastRealizedSnapshot = state.realized || 0;
 
     const today = new Date().toDateString();
     if (state.risk.day !== today) { state.risk.day = today; state.risk.dayStart = eq; bus.riskStatus.dayPaused = false; bus.riskStatus.dayProfitLock = false; bus.markDirty(); }

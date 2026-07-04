@@ -40,7 +40,9 @@ function start(bus) {
       if (d._processed) continue; d._processed = true;
       anomaly('dl:' + d.sym + ':' + d.t, `order failed ${d.sym}: ${d.error}`, true);
     }
+    // #4fix: Cap dead-letter queue at 500 items + age > 6h (prevent unbounded growth)
     bus.deadLetter = bus.deadLetter.filter(d => Date.now() - (d.at || 0) < 6 * 3600e3);
+    if (bus.deadLetter.length > 500) bus.deadLetter = bus.deadLetter.slice(-500);
     bus.audit.deadLetter = bus.deadLetter.slice(-20).map(d => ({ sym: d.sym, error: d.error, t: d.t }));
 
     // 3) CHECKSUM — our equity (cash + marked positions) should track T212's own "total".

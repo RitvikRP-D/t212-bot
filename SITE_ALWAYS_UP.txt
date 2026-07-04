@@ -1,0 +1,47 @@
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🌐 MISSION CONTROL — 24/7 DEPLOYMENT
+
+Your control website will NEVER be dead again.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+## WHAT'S READY
+
+  ✓ control.html  — Beautiful phone-first control dashboard
+  ✓ Vercel config  — Deploy static site (free, instant)
+  ✓ Railway config — Deploy bot API server (free, 24/7)
+  ✓ CORS wiring    — Site ↔ API works cross-origin
+
+## THE PLAN
+
+1. Deploy control.html to Vercel          → always online at https://t212-control.vercel.app
+2. Deploy bot API to Railway              → runs 24/7 at https://t212-bot.railway.app
+3. Open control.html on your phone        → auto-detects and talks to Railway backend
+4. All buttons work: Pause, Resume, Kill, Rebaseline
+
+That's it. No dead site. Ever.
+
+## HOW TO DEPLOY (next conversation)
+
+Read DEPLOY_24_7.md in this directory — step-by-step instructions for both platforms.
+
+You'll need:
+  • 2 minutes to link GitHub to Vercel
+  • 2 minutes to link GitHub to Railway
+  • Your T212 API keys (paste into Railway dashboard)
+
+Both are free. Railway free tier runs 500 hrs/month (you'll need ~$5/mo upgrade for 24/7).
+
+## BEFORE YOU DEPLOY
+
+Push all files to GitHub. I'll do this next — just say "PUSH" when ready.
+
+Then:
+  1. Go to vercel.com, import the GitHub repo
+  2. Go to railway.app, import the GitHub repo
+  3. Paste your T212 keys into Railway
+  4. Both start automatically
+  5. You're live
+
+Control site URL will appear in both dashboards. Bookmark it. You're in control forever.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

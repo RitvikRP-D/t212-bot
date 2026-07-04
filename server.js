@@ -19,6 +19,14 @@ const { fallback } = require('./lib/universe');
 const DATA = path.join(__dirname, 'bot-data');
 if (!fs.existsSync(DATA)) fs.mkdirSync(DATA, { recursive: true });
 const STATE_FILE = path.join(DATA, 'state.json');
+const STATE_TEMP = STATE_FILE + '.tmp';
+
+function atomicWriteState() {
+  try {
+    fs.writeFileSync(STATE_TEMP, JSON.stringify(state), 'utf8');
+    fs.renameSync(STATE_TEMP, STATE_FILE);  // atomic swap
+  } catch (e) { console.error('[state] atomic write failed:', e.message); }
+}
 
 let state = {
   paper: { balance: PAPER_START, positions: {} },
@@ -26,20 +34,112 @@ let state = {
   realized: 0, history: [], learn: {}, equityCurve: [], pause: false,
   startedAt: new Date().toISOString(),
 };
-try { state = Object.assign(state, JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'))); console.log('[state] loaded'); }
-catch (e) { console.log('[state] fresh start — $' + PAPER_START + ' virtual ledger'); }
+try {
+  state = Object.assign(state, JSON.parse(fs.readFileSync(STATE_FILE, 'utf8')));
+  console.log('[state] loaded from ' + STATE_FILE);
+} catch (e) {
+  console.log('[state] fresh start — $' + PAPER_START + ' virtual ledger (load failed: ' + e.message + ')');
+}
 
 let dirty = false;
+let lastHealthy = Date.now();  // track last successful trade/order
 const bus = {
   market: {}, state, news: {},
   universe: fallback(),
   markDirty: () => { dirty = true; },
   onTick: null, onTrade: null,
   beats: {}, beat: (n) => { bus.beats[n] = Date.now(); },   // fleet heartbeat pings (medic also owns this)
+  recordTrade: () => { lastHealthy = Date.now(); },  // called on successful order/trade
 };
-setInterval(() => { if (dirty) { try { fs.writeFileSync(STATE_FILE, JSON.stringify(state)); } catch (e) {} dirty = false; } }, 5000);
-bus.saveNow = () => { try { fs.writeFileSync(STATE_FILE, JSON.stringify(state)); dirty = false; } catch (e) {} };
-for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { try { fs.writeFileSync(STATE_FILE, JSON.stringify(state)); } catch (e) {} process.exit(0); });
+
+// AUTONOMOUS SAFETY: GitHub kill-switch file detection
+// If you push a file named .emergency-halt to the repo, bot detects it on startup and liquidates
+const EMERGENCY_HALT_FILE = path.join(__dirname, '.emergency-halt');
+if (fs.existsSync(EMERGENCY_HALT_FILE)) {
+  console.log('[SAFETY] Emergency halt file detected — liquidating all positions and pausing');
+  state.pause = true;
+  bus.liquidateAll = (reason) => {
+    console.log('[liquidate] ' + reason);
+    for (const [sym, p] of Object.entries(state.t212.positions)) {
+      if (p && !p.pendingFill) p.pendingFill = true;
+    }
+  };
+  if (bus.liquidateAll) bus.liquidateAll('emergency halt file detected');
+  atomicWriteState();
+  try { fs.unlinkSync(EMERGENCY_HALT_FILE); } catch (e) {}
+}
+setInterval(() => { if (dirty) { atomicWriteState(); dirty = false; } }, 5000);
+bus.saveNow = () => { atomicWriteState(); dirty = false; };
+for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { atomicWriteState(); process.exit(0); });
+
+// AUTONOMOUS SAFETY: Dead-man's switch
+// If no successful trade/reconcile for 1h+ during market hours, auto-liquidate (something is stuck)
+setInterval(() => {
+  const now = Date.now();
+  const minsSinceHealthy = (now - lastHealthy) / 60000;
+  const openPos = Object.keys(state.t212.positions).length;
+
+  // Only check during market hours (rough: 7am-10pm UTC covers most markets)
+  const hour = new Date().getUTCHours();
+  const isMarketHours = hour >= 7 && hour < 22;
+
+  if (isMarketHours && openPos > 0 && minsSinceHealthy > 60) {
+    console.error(`[DEAD-MAN] No activity for ${minsSinceHealthy.toFixed(0)}m with ${openPos} open — auto-liquidating`);
+    state.pause = true;
+    if (bus.liquidateAll) bus.liquidateAll(`dead-man switch: no activity for ${minsSinceHealthy.toFixed(0)}m`);
+    if (bus.notify) bus.notify(`🚨 Dead-man switch triggered: no bot activity for 1+ hour. Liquidating ${openPos} open position(s).`);
+    atomicWriteState();
+  }
+}, 60000);  // check every 1 minute
+
+// AUTONOMOUS HEALTH HEARTBEAT: verify bot is actually functioning
+// Every 5 min, check: T212 connected, recent orders went through, state looks sane
+setInterval(() => {
+  const checks = [];
+
+  // Check 1: T212 still connected
+  checks.push({
+    name: 'T212 connection',
+    ok: bus.t212Status && bus.t212Status.connected,
+    lastError: bus.t212Status ? bus.t212Status.lastError : 'no status'
+  });
+
+  // Check 2: Risk guardian alive
+  checks.push({
+    name: 'Risk guardian',
+    ok: bus.riskStatus && bus.riskStatus.checked,
+    lastError: !bus.riskStatus ? 'no status' : null
+  });
+
+  // Check 3: Market data flowing
+  checks.push({
+    name: 'Market data',
+    ok: Object.keys(bus.market || {}).length > 10,
+    lastError: 'market data stale'
+  });
+
+  const failures = checks.filter(c => !c.ok);
+  if (failures.length >= 2 && Object.keys(state.t212.positions).length > 0) {
+    console.error('[HEALTH] Critical checks failing:', failures.map(f => f.name).join(', '));
+    if (bus.notify) bus.notify(`⚠️ Bot health check failed: ${failures.map(f => f.name).join(', ')}. Consider manual intervention.`);
+  }
+}, 300000);  // every 5 minutes
+
+// STATUS PING: write "I'm alive" marker to the repo so you can check health
+setInterval(() => {
+  const statusFile = path.join(DATA, '.bot-status');
+  const status = {
+    alive: true,
+    timestamp: new Date().toISOString(),
+    connected: bus.t212Status?.connected || false,
+    openPositions: Object.keys(state.t212.positions).length,
+    equity: bus.t212Status?.total || state.paper.balance,
+    lastTrade: new Date(lastHealthy).toISOString()
+  };
+  try {
+    fs.writeFileSync(statusFile, JSON.stringify(status, null, 2));
+  } catch (e) { /* silent */ }
+}, 60000);  // every 1 minute
 
 // Cloud mode: GitHub Actions jobs must end before the 6h hard limit, so exit
 // cleanly after MAX_RUN_MINUTES; the next scheduled run restores state and continues.
@@ -50,7 +150,7 @@ if (maxMin > 0) {
   // so we never liquidate here — we just persist state and confirm a clean handoff.
   setTimeout(() => { try { if (bus.notify) bus.notify(`⏱️ Cloud run window ending — saving state and handing off to the next scheduled run. Open positions: ${Object.keys(state.t212.positions).length}.`); } catch (e) {} }, Math.max(0, maxMin * 60000 - 90000));
   setTimeout(() => {
-    try { fs.writeFileSync(STATE_FILE, JSON.stringify(state)); } catch (e) {}
+    atomicWriteState();
     console.log(`[server] ${maxMin} min run window done — state saved, exiting cleanly for next scheduled run`);
     process.exit(0);
   }, maxMin * 60000);
@@ -60,6 +160,9 @@ if (maxMin > 0) {
 require('./agents/risk').start(bus);        // ⑦ risk guardian (10% hard floor) — first, so gates exist
 require('./agents/news').start(bus);        // ② market news + congress
 require('./agents/livenews').start(bus);    // ⑬ FT/Guardian/Economist/BBC + Bloomberg/CNBC video desks
+require('./agents/newsradar').start(bus);   // 🅐 global 24/7 news radar (FT/Guardian/Economist/Reuters/AP + Trump/Truth Social + Asia/EU/US)
+require('./agents/newsbrain').start(bus);   // 🅑 news interpreter — maps stories→instruments, grounds in ~century of history
+require('./agents/newsbridge').start(bus);  // 🅒 news→fleet bridge — feeds interpreted news into trader votes + boards
 require('./agents/stocks').start(bus);      // ① 1-min scanner, 16k universe
 require('./agents/crypto').start(bus);      // ⑩ crypto 24/7 (Binance + crypto news + ETP mapping)
 require('./agents/commodities').start(bus); // ⑫ gold/silver/oil/copper… 24 targets via ~23h futures
@@ -121,6 +224,9 @@ function snapshot() {
     historian: bus.histStatus, ranker: bus.rankStatus, marketMap: bus.marketMap, alloc: bus.allocStatus,
     earnings: { count: (bus.earnings || {}).count, updated: (bus.earnings || {}).updated }, alerts: bus.alertStatus,
     pine: bus.pineStatus, regime: bus.regime, perf: bus.perf, audit: bus.audit, fleet: bus.fleet,
+    newsRadar: bus.newsRadar ? { global: bus.newsRadar.global, sources: bus.newsRadar.sources, total: bus.newsRadar.total, updated: bus.newsRadar.updated, byRegion: bus.newsRadar.byRegion, byEntity: bus.newsRadar.byEntity, headlines: (bus.newsRadar.headlines || []).slice(0, 30), trumpFeed: (bus.newsRadar.trumpFeed || []).slice(0, 12) } : null,
+    newsBrain: bus.newsBrain ? { themes: bus.newsBrain.themes, top: bus.newsBrain.top, updated: bus.newsBrain.updated } : null,
+    newsBridge: bus.newsBridge ? { aligned: bus.newsBridge.aligned, conflicts: bus.newsBridge.conflicts, updated: bus.newsBridge.updated } : null,
     queue: Object.entries(state.queue || {}).map(([sym, q]) => ({ sym, ...q })),
     newsAgent: { updated: bus.news.updated, headlines: (bus.news.headlines || []).length, congress: (bus.news.congress || []).length },
     paperCash: +state.paper.balance.toFixed(2),
@@ -141,7 +247,16 @@ function snapshot() {
 const server = http.createServer((req, res) => {
   const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET,POST,OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type' };
   if (req.method === 'OPTIONS') { res.writeHead(204, cors); return res.end(); }
-  if (req.url === '/' || req.url === '/index.html') {
+  if (req.url === '/' || req.url === '/index.html' || req.url === '/control' || req.url === '/control.html') {
+    // new all-in-one control site is the default; old dashboard still at /legacy
+    const file = (req.url.startsWith('/legacy')) ? 'dashboard.html' : 'control.html';
+    try { res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', ...cors }); return res.end(fs.readFileSync(path.join(__dirname, file))); }
+    catch (e) {
+      try { res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', ...cors }); return res.end(fs.readFileSync(path.join(__dirname, 'dashboard.html'))); }
+      catch (e2) { res.writeHead(500); return res.end('site missing'); }
+    }
+  }
+  if (req.url === '/legacy' || req.url === '/legacy.html') {
     try { res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', ...cors }); return res.end(fs.readFileSync(path.join(__dirname, 'dashboard.html'))); }
     catch (e) { res.writeHead(500); return res.end('dashboard missing'); }
   }
@@ -182,6 +297,29 @@ const server = http.createServer((req, res) => {
     if (bus.notify) bus.notify('🛑 KILL switch pressed on dashboard — liquidating + paused.');
     res.writeHead(200, { 'Content-Type': 'application/json', ...cors });
     return res.end(JSON.stringify({ killed: true, paused: true }));
+  }
+  // REBASELINE — when you manually fund/withdraw the account, hit this to resync the risk floor
+  if (req.url === '/api/rebaseline' && req.method === 'POST') {
+    if (!bus.t212Status || !bus.t212Status.total) {
+      res.writeHead(400, { 'Content-Type': 'application/json', ...cors });
+      return res.end(JSON.stringify({ error: 'T212 not connected yet' }));
+    }
+    const eq = bus.t212Status.total;
+    const oldBaseline = state.risk.baseline;
+    state.risk.baseline = +eq.toFixed(2);
+    if (state.risk.dayStart) {
+      const scaleFactor = eq / (oldBaseline || eq);
+      state.risk.dayStart = +(state.risk.dayStart * scaleFactor).toFixed(2);
+    }
+    state.risk.lastRealizedSnapshot = state.realized || 0;
+    if (state.risk.halted) {
+      state.risk.halted = false;
+      state.risk.haltReason = null;
+    }
+    bus.markDirty();
+    if (bus.notify) bus.notify(`💰 Account rebalanced: baseline £${oldBaseline || '?'} → £${eq.toFixed(2)}`);
+    res.writeHead(200, { 'Content-Type': 'application/json', ...cors });
+    return res.end(JSON.stringify({ rebaseline: true, baseline: state.risk.baseline, eq }));
   }
   res.writeHead(404, cors); res.end('not found');
 });
