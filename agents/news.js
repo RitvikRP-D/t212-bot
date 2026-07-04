@@ -29,7 +29,8 @@ function start(bus) {
     ];
     let ok = 0;
     const fetchTime = Date.now();
-    for (const [u, s] of feeds) { try { const h = await fetchHeadlines(u, s); if (h.length) ok++; heads.push(...h); } catch (e) {} }
+    const rs = await Promise.allSettled(feeds.map(([u, s]) => fetchHeadlines(u, s)));
+    for (const r of rs) { if (r.status === 'fulfilled' && r.value.length) { ok++; heads.push(...r.value); } }
     bus.news.feedsOk = ok;
     if (!heads.length) return;
     // #new④: populate ageHours on each headline (assume fresh if no pubTime)

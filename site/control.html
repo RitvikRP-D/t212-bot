@@ -98,6 +98,7 @@
   <div class="tabs">
     <div class="tab on" data-t="overview" onclick="tab('overview')">Overview</div>
     <div class="tab" data-t="news" onclick="tab('news')">📰 News Radar</div>
+    <div class="tab" data-t="corr" onclick="tab('corr')">🎯 News→Stocks</div>
     <div class="tab" data-t="brain" onclick="tab('brain')">🧠 News Brain</div>
     <div class="tab" data-t="positions" onclick="tab('positions')">Positions</div>
     <div class="tab" data-t="agents" onclick="tab('agents')">All Agents</div>
@@ -121,6 +122,13 @@
       <div id="regionchips" style="margin-bottom:10px;"></div>
       <div class="feed" id="radarfeed"></div>
     </div>
+  </section>
+
+  <!-- NEWS → STOCKS CORRELATIONS -->
+  <section id="s-corr">
+    <h2>🅓 What each headline means for a stock <span class="u" id="corr-u"></span></h2>
+    <div class="panel" style="font-size:10px;color:var(--muted);margin-bottom:8px;">Every incoming headline → which stock it hits, which way, and why — each call cross-checked against the live TradingView chart (AGREES / DISAGREES). Green = news + chart both point up.</div>
+    <div class="panel"><div class="feed" id="corrfeed"></div></div>
   </section>
 
   <!-- NEWS BRAIN -->
@@ -240,6 +248,23 @@ function render(d){
     $('regionchips').innerHTML=Object.entries(d.newsRadar.byRegion||{}).map(([r,v])=>`<span class="chip ${scoreColor(v.score)}">${r} ${(v.score>0?'+':'')+v.score} <span class="muted">(${v.n})</span></span>`).join('');
     $('radarfeed').innerHTML=(d.newsRadar.headlines||[]).map(h=>`
       <div class="hl"><span class="src">${esc(h.source)}</span><span>${esc(h.title)} ${(h.entities||[]).slice(0,3).map(e=>`<span class="tag">${e}</span>`).join('')}</span><span class="score ${scoreColor(h.score)}">${(h.score>0?'+':'')+h.score}</span></div>`).join('');
+  }
+
+  // NEWS → STOCKS CORRELATIONS
+  if(d.newsCorrStatus){
+    $('corr-u').textContent=(d.newsCorrStatus.active||0)+' live · '+(d.newsCorrStatus.withTV||0)+' chart-checked · '+(d.newsCorrStatus.tracked||0)+' names tracked · '+(d.newsCorrStatus.updated||'');
+  }
+  if(d.newsCorrelations){
+    $('corrfeed').innerHTML=(d.newsCorrelations||[]).length?(d.newsCorrelations||[]).map(c=>{
+      const dir=c.direction==='UP'?'green':c.direction==='DOWN'?'red':'muted';
+      const arrow=c.direction==='UP'?'▲':c.direction==='DOWN'?'▼':'▬';
+      const tvbadge=c.tv?`<span class="tag ${/buy/i.test(c.tv)?'green':/sell/i.test(c.tv)?'red':''}">📈 ${esc(c.tv)}</span>`:'';
+      const agree=/AGREES/.test(c.why)?'<span class="tag green">✓ chart agrees</span>':/DISAGREES/.test(c.why)?'<span class="tag red">✗ chart differs</span>':'';
+      return `<div class="hl"><span class="score ${dir}" style="width:52px;">${arrow} ${(c.strength>0?'+':'')+c.strength}</span>
+        <span><b style="color:var(--text)">${esc(c.sym)}</b> ${tvbadge} ${agree} ${c.open?'':'<span class="tag">mkt closed</span>'}<br>
+        <span style="font-size:10px;color:var(--muted)">${esc(c.why)}</span></span>
+        <span class="src">${esc(c.source)}</span></div>`;
+    }).join(''):'<div class="muted" style="padding:8px;">Correlating headlines against tracked stocks…</div>';
   }
 
   // NEWS BRAIN

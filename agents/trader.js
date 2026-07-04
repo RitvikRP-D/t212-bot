@@ -236,6 +236,15 @@ function start(bus) {
         else if (nb < -0.4) tvNote += ` · news-brain ${nb.toFixed(2)} (caution)`;
       }
     }
+    // NEWS CORRELATOR (agent 🅓): per-headline impact already cross-checked vs the
+    // TradingView chart. A clearly positive, chart-agreeing read adds a vote + small
+    // conf bump; a strongly negative one docks conf. Bounded — advisory, never override.
+    if (bus.newsImpact && bus.newsImpact[sym] != null) {
+      const ni = bus.newsImpact[sym];
+      conf = Math.max(0, Math.min(1, conf + Math.max(-0.07, Math.min(0.07, ni * 0.07))));
+      if (ni > 0.3) { votes.push('news-correlate'); tvNote += ` · news→stock +${ni.toFixed(2)}`; }
+      else if (ni < -0.35) tvNote += ` · news→stock ${ni.toFixed(2)} (headwind)`;
+    }
     mk.lastVotes = votes;
 
     // ——— ENTRY TIMING (#8) — don't catch a falling knife on reversal setups ———

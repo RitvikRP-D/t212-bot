@@ -160,9 +160,11 @@ if (maxMin > 0) {
 require('./agents/risk').start(bus);        // ⑦ risk guardian (10% hard floor) — first, so gates exist
 require('./agents/news').start(bus);        // ② market news + congress
 require('./agents/livenews').start(bus);    // ⑬ FT/Guardian/Economist/BBC + Bloomberg/CNBC video desks
-require('./agents/newsradar').start(bus);   // 🅐 global 24/7 news radar (FT/Guardian/Economist/Reuters/AP + Trump/Truth Social + Asia/EU/US)
+require('./agents/newsradar').start(bus);   // 🅐 global 24/7 news radar (~60 desks: FT/Guardian/Economist/Reuters/Bloomberg/CNBC/WSJ + Trump/Truth Social + Asia/EU/US)
 require('./agents/newsbrain').start(bus);   // 🅑 news interpreter — maps stories→instruments, grounds in ~century of history
 require('./agents/newsbridge').start(bus);  // 🅒 news→fleet bridge — feeds interpreted news into trader votes + boards
+require('./agents/newscorrelate').start(bus); // 🅓 correlator — every headline → affected stocks + direction + why, cross-checked vs TradingView
+require('./agents/openbell').start(bus);    // 🔔 opening-bell trigger — fresh news+chart re-analysis the instant a venue opens
 require('./agents/stocks').start(bus);      // ① 1-min scanner, 16k universe
 require('./agents/crypto').start(bus);      // ⑩ crypto 24/7 (Binance + crypto news + ETP mapping)
 require('./agents/commodities').start(bus); // ⑫ gold/silver/oil/copper… 24 targets via ~23h futures
@@ -227,6 +229,9 @@ function snapshot() {
     newsRadar: bus.newsRadar ? { global: bus.newsRadar.global, sources: bus.newsRadar.sources, total: bus.newsRadar.total, updated: bus.newsRadar.updated, byRegion: bus.newsRadar.byRegion, byEntity: bus.newsRadar.byEntity, headlines: (bus.newsRadar.headlines || []).slice(0, 30), trumpFeed: (bus.newsRadar.trumpFeed || []).slice(0, 12) } : null,
     newsBrain: bus.newsBrain ? { themes: bus.newsBrain.themes, top: bus.newsBrain.top, updated: bus.newsBrain.updated } : null,
     newsBridge: bus.newsBridge ? { aligned: bus.newsBridge.aligned, conflicts: bus.newsBridge.conflicts, updated: bus.newsBridge.updated } : null,
+    newsCorrelations: bus.newsCorrelations ? bus.newsCorrelations.slice(0, 60) : null,
+    newsCorrStatus: bus.newsCorrStatus || null,
+    openBell: bus.openBell ? { lastOpened: bus.openBell.lastOpened, history: bus.openBell.history } : null,
     queue: Object.entries(state.queue || {}).map(([sym, q]) => ({ sym, ...q })),
     newsAgent: { updated: bus.news.updated, headlines: (bus.news.headlines || []).length, congress: (bus.news.congress || []).length },
     paperCash: +state.paper.balance.toFixed(2),

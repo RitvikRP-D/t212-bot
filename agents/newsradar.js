@@ -52,6 +52,42 @@ const SOURCES = [
   ['https://news.google.com/rss/search?q=earnings+OR+guidance+OR+profit+warning+when:1d&hl=en-US', 'GoogleNews', 'US'],
   ['https://news.google.com/rss/search?q=merger+OR+acquisition+OR+buyout+when:1d&hl=en-US', 'GoogleNews', 'US'],
   ['https://news.google.com/rss/search?q=geopolitics+OR+war+OR+sanctions+OR+conflict+when:1d&hl=en-GB', 'GoogleNews', 'global'],
+
+  // ═══ TIER 2 — the top-100 desks (user-curated), all verified live RSS ═══
+  // Live broadcast networks
+  ['https://moxie.foxbusiness.com/google-publisher/markets.xml', 'FoxBusiness', 'US'],
+  ['https://www.cnbc.com/id/15839135/device/rss/rss.html', 'CNBCfinance', 'US'],
+  ['https://www.cnbc.com/id/19794221/device/rss/rss.html', 'CNBCtech', 'US'],
+  ['https://www.cnbc.com/id/100727362/device/rss/rss.html', 'CNBCworld', 'global'],
+  ['https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=10000664', 'CNBCintl', 'global'],
+  ['https://news.google.com/rss/search?q=site:cnbctv18.com+when:1d&hl=en-IN', 'CNBCTV18', 'ASIA'],
+  // Wires + breaking + press releases (earnings/M&A/regulatory land here first)
+  ['https://feeds.content.dowjones.io/public/rss/mw_topstories', 'MarketWatch', 'US'],
+  ['https://feeds.content.dowjones.io/public/rss/RSSMarketsMain', 'WSJmkts', 'US'],
+  ['https://seekingalpha.com/market_currents.xml', 'SeekingAlpha', 'US'],
+  ['https://www.benzinga.com/feed', 'Benzinga', 'US'],
+  ['https://www.globenewswire.com/RssFeed/orgclass/1/feedTitle/GlobeNewswire%20-%20News%20Room', 'GlobeNewswire', 'global'],
+  ['https://www.prnewswire.com/rss/news-releases-list.rss', 'PRNewswire', 'global'],
+  ['https://news.google.com/rss/search?q=site:thestreet.com+when:1d&hl=en-US', 'TheStreet', 'US'],
+  // Premium newspapers & journals
+  ['https://asia.nikkei.com/rss/feed/nar', 'NikkeiAsia', 'ASIA'],
+  ['https://www.nytimes.com/svc/collections/v1/publish/https://www.nytimes.com/section/business/rss.xml', 'NYTBusiness', 'US'],
+  ['https://www.scmp.com/rss/92/feed', 'SCMP', 'ASIA'],
+  ['https://economictimes.indiatimes.com/markets/rssfeeds/1977021501.cms', 'EconomicTimes', 'ASIA'],
+  ['https://www.livemint.com/rss/markets', 'LiveMint', 'ASIA'],
+  // Digital analysis / macro / contrarian
+  ['https://www.investing.com/rss/news.rss', 'Investing', 'global'],
+  ['https://www.investing.com/rss/news_25.rss', 'InvestingMkt', 'global'],
+  ['https://feeds.feedburner.com/zerohedge/feed', 'ZeroHedge', 'global'],
+  // Sector authorities — crypto / tech / energy / pharma / logistics / space / mining
+  ['https://www.coindesk.com/arc/outboundfeeds/rss/', 'CoinDesk', 'global'],
+  ['https://cointelegraph.com/rss', 'CoinTelegraph', 'global'],
+  ['https://www.theblock.co/rss.xml', 'TheBlock', 'global'],
+  ['https://techcrunch.com/feed/', 'TechCrunch', 'US'],
+  ['https://www.fiercepharma.com/rss/xml', 'FiercePharma', 'US'],
+  ['https://www.freightwaves.com/feed', 'FreightWaves', 'US'],
+  ['https://www.mining.com/feed/', 'Mining', 'global'],
+  ['https://spacenews.com/feed/', 'SpaceNews', 'US'],
 ];
 
 // Entities we tag on every headline — the brain agent + trader use these to route impact.
@@ -77,27 +113,42 @@ function start(bus) {
     global: 0, trumpFeed: [], sources: 0, total: 0, updated: null,
   };
   const seen = new Set();   // de-dupe by title across sweeps
+  let sweeping = false;     // overlap guard — never stack sweeps
+  let sweepNo = 0;
 
   async function sweep() {
+    if (sweeping) return;
+    sweeping = true;
+    try { await doSweep(); } finally { sweeping = false; }
+  }
+
+  async function doSweep() {
     if (bus.beat) bus.beat('newsradar');
     const fresh = [];
-    let ok = 0;
-    let fails = 0;
+    let ok = 0, fails = 0;
     const at = Date.now();
-    for (const [url, source, region] of SOURCES) {
-      try {
-        const items = await fetchHeadlines(url, source, 15);
-        if (items.length) ok++;
-        for (const it of items) {
-          const key = it.title.slice(0, 80).toLowerCase();
-          if (seen.has(key)) continue;
-          seen.add(key);
-          const score = scoreHeadline(it.title, source);
-          const entities = [];
-          for (const [name, re] of Object.entries(ENTITIES)) if (re.test(it.title)) entities.push(name);
-          fresh.push({ title: it.title, source, region, score, entities, at });
-        }
-      } catch (e) { fails++; if (fails === 1) console.log('[newsradar] feed fetch failed: ' + e.message); }
+    sweepNo++;
+    // ALL feeds in parallel — a slow/dead feed costs 12s (its own timeout), not the sweep
+    const results = await Promise.allSettled(SOURCES.map(([url, source]) => fetchHeadlines(url, source, 15)));
+    results.forEach((res, i) => {
+      const [, source, region] = SOURCES[i];
+      if (res.status !== 'fulfilled') { fails++; return; }
+      if (res.value.length) ok++;
+      for (const it of res.value) {
+        const key = it.title.slice(0, 80).toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const score = scoreHeadline(it.title, source);
+        const entities = [];
+        for (const [name, re] of Object.entries(ENTITIES)) if (re.test(it.title)) entities.push(name);
+        fresh.push({ title: it.title, source, region, score, entities, at });
+      }
+    });
+    // liveness is visible even on a quiet sweep; log health early + periodically
+    bus.newsRadar.sources = ok;
+    bus.newsRadar.updated = new Date().toLocaleTimeString();
+    if (sweepNo <= 3 || sweepNo % 30 === 0 || (ok === 0 && fails > 0)) {
+      console.log(`[newsradar] sweep #${sweepNo}: ${ok}/${SOURCES.length} feeds ok, ${fails} failed, ${fresh.length} new headlines`);
     }
     // keep the seen-set from growing forever
     if (seen.size > 4000) { seen.clear(); }

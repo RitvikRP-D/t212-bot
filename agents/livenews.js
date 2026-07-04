@@ -34,7 +34,8 @@ function start(bus) {
 
   async function refresh() {
     const heads = []; let ok = 0;
-    for (const [u, s] of FEEDS) { try { const h = await fetchHeadlines(u, s, 12); if (h.length) ok++; heads.push(...h); } catch (e) {} }
+    const rs = await Promise.allSettled(FEEDS.map(([u, s]) => fetchHeadlines(u, s, 12)));
+    for (const r of rs) { if (r.status === 'fulfilled' && r.value.length) { ok++; heads.push(...r.value); } }
     if (!heads.length) return;
     for (const h of heads) h.score = scoreHeadline(h.title, h.source);
     bus.deepNews.headlines = heads.slice(0, 40);
