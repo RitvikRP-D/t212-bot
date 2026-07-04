@@ -54,6 +54,28 @@ function start(bus) {
       state.risk.baseline = +eq.toFixed(2);
       incident(`baseline set: ${eq.toFixed(2)} — hard floor ${(eq * (1 - RISK.MAX_DRAWDOWN)).toFixed(2)}`);
     }
+    // ACCOUNT FUNDING / RESET / SWITCH detection — the baseline can go stale when cash
+    // changes for a NON-trading reason: a deposit, a withdrawal, a demo reset, or
+    // switching the API keys to a different account (e.g. £10k practice → £100 real).
+    // If equity diverges a lot from baseline while we hold NO positions and have NOT
+    // realised a matching loss, it isn't a drawdown — it's the account itself changing.
+    // Re-baseline instead of false-halting. A genuine trading loss (open positions or a
+    // real negative realised P&L) is untouched and still halts correctly.
+    if (state.risk.baseline) {
+      const noPositions = Object.keys(state.t212.positions).length === 0;
+      const notFromTrading = Math.abs(state.realized || 0) < state.risk.baseline * 0.02;
+      const bigDivergence = Math.abs(eq - state.risk.baseline) > state.risk.baseline * 0.15;
+      if (noPositions && notFromTrading && bigDivergence) {
+        incident(`re-baseline ${state.risk.baseline.toFixed(2)} → ${eq.toFixed(2)}: no positions, no trading loss — account funding/reset/switch detected, halt cleared`);
+        state.risk.baseline = +eq.toFixed(2);
+        state.risk.halted = false; bus.riskStatus.halted = false;
+        state.risk.haltReason = null; bus.riskStatus.haltReason = null;
+        state.pause = false;
+        state.risk.day = null;   // force a fresh day-start below
+        bus.markDirty();
+      }
+    }
+
     const today = new Date().toDateString();
     if (state.risk.day !== today) { state.risk.day = today; state.risk.dayStart = eq; bus.riskStatus.dayPaused = false; bus.markDirty(); }
 
