@@ -374,15 +374,14 @@ const server = http.createServer((req, res) => {
     const eq = bus.t212Status.total;
     const oldBaseline = state.risk.baseline;
     state.risk.baseline = +eq.toFixed(2);
-    if (state.risk.dayStart) {
-      const scaleFactor = eq / (oldBaseline || eq);
-      state.risk.dayStart = +(state.risk.dayStart * scaleFactor).toFixed(2);
-    }
+    state.risk.dayStart = +eq.toFixed(2);
+    state.risk.realizedAtBaseline = state.realized || 0;   // keep auto-baseline drift math in sync
     state.risk.lastRealizedSnapshot = state.realized || 0;
     if (state.risk.halted) {
       state.risk.halted = false;
       state.risk.haltReason = null;
     }
+    state.pause = false;
     bus.markDirty();
     if (bus.notify) bus.notify(`💰 Account rebalanced: baseline £${oldBaseline || '?'} → £${eq.toFixed(2)}`);
     res.writeHead(200, { 'Content-Type': 'application/json', ...cors });

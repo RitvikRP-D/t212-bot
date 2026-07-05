@@ -50,17 +50,6 @@ function start(bus) {
     const eq = equityNow();
     if (eq == null || !isFinite(eq) || eq <= 0) return;
 
-    // SAFETY: detect account switch (practice→real or real→practice)
-    // If baseline was set with a very different equity, something changed
-    if (state.risk.baseline && eq) {
-      const ratio = eq / state.risk.baseline;
-      if (ratio < 0.1 || ratio > 10) {
-        // 10× difference = almost certainly switched accounts
-        incident(`⚠️ ACCOUNT MISMATCH DETECTED: baseline was £${state.risk.baseline.toFixed(2)}, but equity is now £${eq.toFixed(2)} — you may have switched from practice to real. Clear your state before live trading!`);
-        if (bus.notify) bus.notify(`🚨 ACCOUNT SWITCH DETECTED: If you just switched to real money, STOP and clear state.json baseline + history first!`);
-      }
-    }
-
     // select the active trading profile from live-ness + account size (every agent reads bus.profile)
     bus.profile = activeProfile(eq, t212.isLive());
     bus.riskStatus.profile = bus.profile.name;
@@ -71,38 +60,35 @@ function start(bus) {
       if (!connectedAt) { connectedAt = Date.now(); return; }
       if (Date.now() - connectedAt < 120e3) return;
       state.risk.baseline = +eq.toFixed(2);
+      state.risk.realizedAtBaseline = state.realized || 0;
       incident(`baseline set: ${eq.toFixed(2)} — hard floor ${(eq * (1 - RISK.MAX_DRAWDOWN)).toFixed(2)}`);
     }
-    // ACCOUNT FUNDING / RESET / SWITCH detection — the baseline can go stale when cash
-    // changes for a NON-trading reason: a deposit, a withdrawal, a demo reset, or
-    // switching the API keys to a different account (e.g. £10k practice → £100 real).
-    // If equity diverges a lot from baseline while we hold NO positions and have NOT
-    // realised a matching loss, it isn't a drawdown — it's the account itself changing.
-    // Re-baseline instead of false-halting. A genuine trading loss (open positions or a
-    // real negative realised P&L) is untouched and still halts correctly.
-    // ACCOUNT FUNDING DETECTION: treat large equity jumps unexplained by trading as external cash flow
-    // (deposits/withdrawals), then rebase both baseline and dayStart proportionally so risk floor
-    // and daily profit-lock aren't poisoned by the user's own cash moves — regardless of whether
-    // positions are open. Detect by: equity changed, but no matching realized P&L.
-    if (state.risk.baseline && eq != null && isFinite(eq)) {
-      const eqDelta = eq - state.risk.baseline;
-      const realizedDelta = (state.realized || 0) - (state.risk.lastRealizedSnapshot || 0);
-      const unexplainedDelta = Math.abs(eqDelta - realizedDelta);
-      const isLargeUnexplainedJump = unexplainedDelta > state.risk.baseline * 0.08;  // >8% unexplained = external cash
-      if (isLargeUnexplainedJump && Math.abs(state.realized || 0) < state.risk.baseline * 0.02) {
-        // external funding detected: adjust baseline and dayStart by the residual
-        incident(`re-baseline ${state.risk.baseline.toFixed(2)} → ${eq.toFixed(2)}: external cash flow detected (+${(unexplainedDelta/state.risk.baseline*100).toFixed(0)}%), adjusting floor`);
-        const scaleFactor = eq / state.risk.baseline;
+    // ─── AUTO-BASELINE: keep the risk floor synced to the ACTUAL account, hands-free ───
+    // No button, no clicking. The baseline tracks deposits, withdrawals and practice-account
+    // resets by itself. Two position-safe detectors:
+    //   (a) big-jump: equity differs from baseline by >3× (or <1/3). No trade this bot makes
+    //       moves 3×, so it's certainly the account itself changing (reset/switch) → resync.
+    //   (b) flat-drift: with NO open positions, equity should equal baseline + realised P&L
+    //       booked since the baseline; any gap beyond tolerance is external cash → resync.
+    // Open positions swing equity via unrealised P&L, so (b) is gated on being flat — that
+    // is why a genuine drawdown on OPEN trades still halts correctly and is never masked.
+    if (state.risk.baseline > 0 && eq != null && isFinite(eq)) {
+      const openCount = Object.keys(state.t212.positions).length + Object.keys(state.paper.positions).length;
+      const realizedNow = state.realized || 0;
+      if (state.risk.realizedAtBaseline == null) state.risk.realizedAtBaseline = realizedNow;  // migrate old state
+      const realizedSince = realizedNow - state.risk.realizedAtBaseline;
+      const drift = eq - (state.risk.baseline + realizedSince);
+      const ratio = eq / state.risk.baseline;
+      const bigJump = ratio > 3 || ratio < 0.34;
+      const flatExternal = openCount === 0 && Math.abs(drift) > Math.max(10, state.risk.baseline * 0.05);
+      if (bigJump || flatExternal) {
+        incident(`auto-baseline £${state.risk.baseline.toFixed(2)} → £${eq.toFixed(2)} (${bigJump ? 'account change/reset' : 'deposit/withdrawal'} detected — floor resynced hands-free)`);
+        if (bus.notify) bus.notify(`💷 Account balance now £${eq.toFixed(2)} — risk floor auto-resynced, no action needed.`);
         state.risk.baseline = +eq.toFixed(2);
-        if (state.risk.dayStart) state.risk.dayStart = +(state.risk.dayStart * scaleFactor).toFixed(2);
-        state.risk.lastRealizedSnapshot = state.realized || 0;
-        if (bus.riskStatus.halted) {
-          state.risk.halted = false;
-          bus.riskStatus.halted = false;
-          state.risk.haltReason = null;
-          bus.riskStatus.haltReason = null;
-          state.pause = false;
-        }
+        state.risk.dayStart = +eq.toFixed(2);                 // fresh day-start on a balance change
+        state.risk.realizedAtBaseline = realizedNow;
+        if (state.risk.halted) { state.risk.halted = false; state.risk.haltReason = null; bus.riskStatus.halted = false; bus.riskStatus.haltReason = null; state.pause = false; }
+        bus.riskStatus.dayProfitLock = false; bus.riskStatus.dayPaused = false;
         bus.markDirty();
       }
     }
