@@ -96,7 +96,7 @@ function start(bus) {
         seen.set(key, at);
         liveSources.set(source, at);                          // count a source live only when it yields RELEVANT news
         const score = scoreHeadline(it.title, source);
-        fresh.push({ title: it.title, source, region, score, entities, at });
+        fresh.push({ title: it.title, url: it.url || '', source, region, score, entities, at });
       }
     });
 
@@ -156,7 +156,7 @@ function start(bus) {
     ];
     bus.newsRadar.categories = CATS.map(([name, fn]) => {
       const hs = all.filter(fn);
-      return { name, n: hs.length, score: hs.length ? +(hs.reduce((a, h) => a + h.score, 0) / hs.length).toFixed(2) : 0, top: hs.slice(0, 8).map(h => ({ title: h.title, source: h.source, score: h.score, region: h.region, at: h.at })) };
+      return { name, n: hs.length, score: hs.length ? +(hs.reduce((a, h) => a + h.score, 0) / hs.length).toFixed(2) : 0, top: hs.slice(0, 8).map(h => ({ title: h.title, url: h.url, source: h.source, score: h.score, region: h.region, at: h.at })) };
     }).filter(c => c.n > 0).sort((a, b) => b.n - a.n);
 
     // dedicated lanes
@@ -167,7 +167,7 @@ function start(bus) {
     const COIN_RE = { BTC: /bitcoin|\bbtc\b/i, ETH: /ethereum|\beth\b/i, SOL: /\bsolana\b|\bsol\b/i, XRP: /\bxrp\b|ripple/i, DOGE: /dogecoin|\bdoge\b/i, BNB: /\bbnb\b|binance coin/i, ADA: /cardano|\bada\b/i };
     const coinAgg = {};
     for (const h of cryptoHeads) for (const [c, re] of Object.entries(COIN_RE)) if (re.test(h.title)) (coinAgg[c] = coinAgg[c] || []).push(h);
-    bus.newsRadar.cryptoByCoin = Object.entries(coinAgg).map(([coin, hs]) => ({ coin, n: hs.length, score: +(hs.reduce((a, h) => a + h.score, 0) / hs.length).toFixed(2), top: hs.slice(0, 3).map(h => ({ title: h.title, source: h.source, score: h.score })) })).sort((a, b) => b.n - a.n);
+    bus.newsRadar.cryptoByCoin = Object.entries(coinAgg).map(([coin, hs]) => ({ coin, n: hs.length, score: +(hs.reduce((a, h) => a + h.score, 0) / hs.length).toFixed(2), top: hs.slice(0, 3).map(h => ({ title: h.title, url: h.url, source: h.source, score: h.score })) })).sort((a, b) => b.n - a.n);
     bus.newsRadar.trumpAssets = {
       assets: TRUMP_ASSETS, syms: TRUMP_ASSETS.map(a => a.sym),
       headlines: all.filter(h => h.source === 'TrumpDesk' || /trump media|\bDJT\b|world liberty|\$TRUMP|trump organization|trump family/i.test(h.title)).slice(0, 20),

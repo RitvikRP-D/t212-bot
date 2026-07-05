@@ -48,6 +48,12 @@ const MAP = [
   // Deregulation banks
   { sym: 'GS', name: 'Goldman Sachs', cat: 'Deregulation banks', sign: 1, why: 'lighter financial regulation' },
   { sym: 'JPM', name: 'JPMorgan', cat: 'Deregulation banks', sign: 1, why: 'deregulation + M&A pickup' },
+  // Quantum & AI (policy/executive-order driven — e.g. a quantum or chips push)
+  { sym: 'IONQ', name: 'IonQ', cat: 'Quantum & AI policy', sign: 1, why: 'quantum-computing pure-play — spikes on federal quantum initiatives' },
+  { sym: 'RGTI', name: 'Rigetti Computing', cat: 'Quantum & AI policy', sign: 1, why: 'quantum hardware — gov/defence quantum funding beneficiary' },
+  { sym: 'QBTS', name: 'D-Wave Quantum', cat: 'Quantum & AI policy', sign: 1, why: 'quantum annealing — policy/announcement sensitive' },
+  { sym: 'QUBT', name: 'Quantum Computing Inc', cat: 'Quantum & AI policy', sign: 1, why: 'small-cap quantum — high beta to quantum headlines' },
+  { sym: 'NVDA', name: 'Nvidia', cat: 'Quantum & AI policy', sign: 1, why: 'AI/chips leader — CHIPS-Act & AI-order beneficiary (tariff risk cuts both ways)' },
   // Musk / ally
   { sym: 'TSLA', name: 'Tesla', cat: 'Musk / ally', sign: 1, why: 'Musk alliance, though EV-subsidy cuts cut both ways' },
   // HURT under Trump — clean energy / EV-subsidy dependent
@@ -66,6 +72,7 @@ const THEMES = {
   tariff:      { re: /tariff|trade deal|trade war|import|\bchina\b|steel|aluminium|aluminum/i, cats: ['Tariffs / domestic steel'] },
   immigration: { re: /immigration|border|deport|\bICE\b|migrant|asylum/i, cats: ['Immigration enforcement'] },
   dereg:       { re: /deregulat|red tape|wall street|banks?\b|rollback/i, cats: ['Deregulation banks'] },
+  quantum:     { re: /quantum|artificial intelligence|\bAI\b|chips? act|semiconductor|supercomput/i, cats: ['Quantum & AI policy'] },
   cleanhit:    { re: /green new deal|climate|solar|\bEV\b|electric vehicle|subsid/i, cats: ['Clean energy (headwind)'] },
 };
 
@@ -146,7 +153,7 @@ function start(bus) {
 
     // 5) his most recent posts (with any tickers detected)
     bus.trump.posts = lane.slice(0, 20).map(h => ({
-      source: h.source, title: h.title, at: h.at, score: h.score,
+      source: h.source, title: h.title, url: h.url || '', at: h.at, score: h.score,
       tickers: MAP.filter(m => new RegExp('\\b' + m.sym + '\\b').test(h.title) || new RegExp('\\b' + m.name.split(/[ (]/)[0] + '\\b', 'i').test(h.title)).map(m => m.sym),
     }));
 

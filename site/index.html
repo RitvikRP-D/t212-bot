@@ -184,7 +184,7 @@
   <!-- CRYPTO -->
   <section id="s-crypto">
     <h2>₿ Crypto — 24/7 live <span class="u" id="crypto-u"></span></h2>
-    <div class="panel" style="font-size:10px;color:var(--muted);margin-bottom:8px;">Every coin scanned on Binance 1-min AND rated by the TradingView crypto analyst across 6 timeframes (~10.5k metrics/coin). Crypto never closes — these trade any time via T212 ETPs where mapped.</div>
+    <div class="panel" style="font-size:10px;color:var(--muted);margin-bottom:8px;">50 coins scanned on Binance 1-min data + rated by the TradingView crypto analyst across 6 timeframes (~10.5k metrics/coin), 24/7. <b>What's tradeable:</b> Trading 212 does not offer spot crypto — only a limited set of crypto <b>ETPs</b> (Bitcoin, Ethereum + a few others). The bot analyses all 50 for signals but can only place trades on the coins with a mapped T212 ETP (shown in the ETP column). So: it watches the whole crypto market, trades the slice T212 actually lists.</div>
     <div class="panel"><div class="feed"><table><thead><tr><th>Coin</th><th>Price</th><th>24h</th><th>RSI</th><th>Bot conf</th><th>TradingView</th><th>ETP</th></tr></thead><tbody id="cryptotable"></tbody></table></div></div>
     <h2>🌍 What the world is saying — per coin <span class="u">crypto news mapped to each coin, with mood</span></h2>
     <div class="panel" id="cryptobycoin">gathering…</div>
@@ -309,6 +309,8 @@ function pct(n){n=Number(n||0);return (n>=0?'+':'')+n.toFixed(2)+'%';}
 function cls(n){return n>=0?'green':'red';}
 function px(n){n=Number(n);return n>=100?n.toFixed(2):n>=1?n.toFixed(4):n.toFixed(6);}
 function esc(s){return String(s||'').replace(/[<>&]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]));}
+function A(title,url){const t=esc(title);return url?`<a href="${esc(url)}" target="_blank" rel="noopener" style="color:inherit;text-decoration:none;border-bottom:1px dotted #4a6480;">${t} ↗</a>`:t;}
+function ago(at){if(!at)return'';const s=Math.max(0,(Date.now()-at)/1000);if(s<60)return Math.round(s)+'s ago';if(s<3600)return Math.round(s/60)+'m ago';if(s<86400)return Math.round(s/3600)+'h ago';return Math.round(s/86400)+'d ago';}
 function toast(m){const t=$('toast');t.textContent=m;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2600);}
 
 function tab(name){
@@ -393,29 +395,30 @@ function render(d){
     // category buckets — the clean, readable view
     if($('newscats'))$('newscats').innerHTML=(r.categories||[]).map(c=>`
       <div class="catcard"><div class="ch"><span>${esc(c.name)} <span class="chip ${scoreColor(c.score)}">${(c.score>0?'+':'')+c.score}</span></span><span class="muted">${c.n} stories</span></div>
-      ${(c.top||[]).slice(0,5).map(h=>`<div class="hl" style="padding:4px 0;"><span class="src">${esc(h.source)}</span><span>${esc(h.title)}</span><span class="score ${scoreColor(h.score)}">${(h.score>0?'+':'')+h.score}</span></div>`).join('')}</div>`).join('')||'<div class="muted">gathering…</div>';
+      ${(c.top||[]).slice(0,5).map(h=>`<div class="hl" style="padding:4px 0;"><span class="src">${esc(h.source)}</span><span>${A(h.title,h.url)} <span class="muted" style="font-size:9px;">${ago(h.at)}</span></span><span class="score ${scoreColor(h.score)}">${(h.score>0?'+':'')+h.score}</span></div>`).join('')}</div>`).join('')||'<div class="muted">gathering…</div>';
     // channel health — which sources are delivering
     if($('srchealth')){const bs=Object.entries(r.bySource||{}).sort((a,b)=>b[1].n-a[1].n);
       $('srchealth').innerHTML=`<div class="muted" style="font-size:10px;margin-bottom:6px;">${bs.length} sources delivering market news right now</div>`+bs.slice(0,60).map(([s,v])=>`<span class="chip ${scoreColor(v.score)}">${esc(s)} <span class="muted">${v.n}</span></span>`).join('');}
     // region grid
     $('regionchips').innerHTML=Object.entries(r.byRegion||{}).sort((a,b)=>b[1].n-a[1].n).map(([rg,v])=>`<span class="chip ${scoreColor(v.score)}">${rg} ${(v.score>0?'+':'')+v.score} <span class="muted">(${v.n})</span></span>`).join('');
     $('radarfeed').innerHTML=(r.headlines||[]).map(h=>`
-      <div class="hl"><span class="src">${esc(h.source)}</span><span>${esc(h.title)} ${(h.entities||[]).slice(0,3).map(e=>`<span class="tag">${e}</span>`).join('')}</span><span class="score ${scoreColor(h.score)}">${(h.score>0?'+':'')+h.score}</span></div>`).join('');
+      <div class="hl"><span class="src">${esc(h.source)}</span><span>${A(h.title,h.url)} ${(h.entities||[]).slice(0,3).map(e=>`<span class="tag">${e}</span>`).join('')} <span class="muted" style="font-size:9px;">${ago(h.at)}</span></span><span class="score ${scoreColor(h.score)}">${(h.score>0?'+':'')+h.score}</span></div>`).join('');
     // Trump lane (now on its own tab)
     if($('trump'))$('trump').innerHTML=(r.trumpFeed||[]).length?(r.trumpFeed||[]).map(h=>`
-      <div class="hl"><span class="src trump">${esc(h.source)}</span><span>${esc(h.title)} ${(h.entities||[]).map(e=>`<span class="tag">${e}</span>`).join('')}</span><span class="score ${scoreColor(h.score)}">${(h.score>0?'+':'')+h.score}</span></div>`).join(''):'<div class="muted" style="padding:8px;">No Trump-tagged stories yet this cycle.</div>';
+      <div class="hl"><span class="src trump">${esc(h.source)}</span><span>${A(h.title,h.url)} ${(h.entities||[]).map(e=>`<span class="tag">${e}</span>`).join('')} <span class="muted" style="font-size:9px;">${ago(h.at)}</span></span><span class="score ${scoreColor(h.score)}">${(h.score>0?'+':'')+h.score}</span></div>`).join(''):'<div class="muted" style="padding:8px;">No Trump-tagged stories yet this cycle.</div>';
     // crypto news lane
     if($('cryptonews'))$('cryptonews').innerHTML=(r.cryptoFeed||[]).length?(r.cryptoFeed||[]).map(h=>`
-      <div class="hl"><span class="src">${esc(h.source)}</span><span>${esc(h.title)}</span><span class="score ${scoreColor(h.score)}">${(h.score>0?'+':'')+h.score}</span></div>`).join(''):'<div class="muted" style="padding:8px;">gathering crypto headlines…</div>';
+      <div class="hl"><span class="src">${esc(h.source)}</span><span>${A(h.title,h.url)} <span class="muted" style="font-size:9px;">${ago(h.at)}</span></span><span class="score ${scoreColor(h.score)}">${(h.score>0?'+':'')+h.score}</span></div>`).join(''):'<div class="muted" style="padding:8px;">gathering crypto headlines…</div>';
     // crypto news mapped per coin
     if($('cryptobycoin'))$('cryptobycoin').innerHTML=(r.cryptoByCoin||[]).length?(r.cryptoByCoin||[]).map(c=>`
       <div class="coinrow"><span style="width:52px;font-weight:700;flex-shrink:0;">${esc(c.coin)}</span><span class="chip ${scoreColor(c.score)}">${(c.score>0?'+':'')+c.score}</span>
-      <span class="muted" style="font-size:10px;">${c.n} stories · ${esc((c.top&&c.top[0]&&c.top[0].title||'').slice(0,70))}</span></div>`).join(''):'<span class="muted">no coin-specific crypto news this cycle</span>';
+      <span class="muted" style="font-size:10px;">${c.n} stories · ${A((c.top&&c.top[0]&&c.top[0].title||'').slice(0,70),(c.top&&c.top[0]&&c.top[0].url))}</span></div>`).join(''):'<span class="muted">no coin-specific crypto news this cycle</span>';
   }
 
   // NEWS → STOCKS CORRELATIONS
   if(d.newsCorrStatus){
-    $('corr-u').textContent=(d.newsCorrStatus.active||0)+' live · '+(d.newsCorrStatus.withTV||0)+' chart-checked · '+(d.newsCorrStatus.tracked||0)+' names tracked · '+(d.newsCorrStatus.updated||'');
+    const cs=d.newsCorrStatus;
+    $('corr-u').textContent=(cs.distinct||0)+' stocks moving on news · '+(cs.active||0)+' live links · '+(cs.withTV||0)+' chart-checked · '+(cs.tracked||0)+' names watched · '+(cs.updated||'');
   }
   if(d.newsCorrelations){
     $('corrfeed').innerHTML=(d.newsCorrelations||[]).length?(d.newsCorrelations||[]).map(c=>{
@@ -424,8 +427,8 @@ function render(d){
       const tvbadge=c.tv?`<span class="tag ${/buy/i.test(c.tv)?'green':/sell/i.test(c.tv)?'red':''}">📈 ${esc(c.tv)}</span>`:'';
       const agree=/AGREES/.test(c.why)?'<span class="tag green">✓ chart agrees</span>':/DISAGREES/.test(c.why)?'<span class="tag red">✗ chart differs</span>':'';
       return `<div class="hl"><span class="score ${dir}" style="width:52px;">${arrow} ${(c.strength>0?'+':'')+c.strength}</span>
-        <span><b style="color:var(--text)">${esc(c.sym)}</b> ${tvbadge} ${agree} ${c.open?'':'<span class="tag">mkt closed</span>'}<br>
-        <span style="font-size:10px;color:var(--muted)">${esc(c.why)}</span></span>
+        <span><b style="color:var(--text)">${esc(c.sym)}</b> ${tvbadge} ${agree} ${c.open?'':'<span class="tag">mkt closed</span>'} <span class="muted" style="font-size:9px;">${ago(c.at)}</span><br>
+        ${A(c.headline,c.url)}<br><span style="font-size:10px;color:var(--muted)">${esc(c.why)}</span></span>
         <span class="src">${esc(c.source)}</span></div>`;
     }).join(''):'<div class="muted" style="padding:8px;">Correlating headlines against tracked stocks…</div>';
   }
@@ -498,7 +501,7 @@ function render(d){
   // agents
   // CRYPTO table (price + TradingView per-coin rating)
   if(d.crypto&&d.crypto.top){
-    if($('crypto-u'))$('crypto-u').textContent=(d.cryptoTV&&d.cryptoTV.rated?d.cryptoTV.rated+' coins TV-rated · ':'')+(d.crypto.status&&d.crypto.status.coins||d.crypto.top.length)+' scanned';
+    if($('crypto-u')){const trad=(d.crypto.top||[]).filter(c=>c.etp).length;$('crypto-u').textContent=(d.crypto.status&&d.crypto.status.coins||d.crypto.top.length)+' scanned · '+(d.cryptoTV&&d.cryptoTV.rated||0)+' TV-rated · '+trad+' tradeable via T212 ETPs';}
     if($('cryptotable'))$('cryptotable').innerHTML=(d.crypto.top||[]).map(c=>`<tr>
       <td style="font-weight:700;">${esc(c.coin)}</td><td>${px(c.price)}</td>
       <td class="${cls(c.pct24h)}">${c.pct24h!=null?(c.pct24h>0?'+':'')+Number(c.pct24h).toFixed(1)+'%':'—'}</td>

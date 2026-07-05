@@ -40,6 +40,9 @@ function start(bus) {
   // ―― build a name→symbol matcher (rebuilt when the universe/tracked set changes) ――
   let matcher = [];          // [{ sym, name, re }]
   let matcherKey = '';
+  let bySector = {};         // sector -> [matcher entries] (theme/macro propagation)
+  let lastAt = 0;            // newest headline timestamp already processed (incremental)
+  let rolling = [];          // rolling correlations list (dedup by sym+headline)
   const GENERIC = /^(the|inc|corp|group|plc|ltd|co|holdings|company|international|global|and|&)$/i;
 
   function rebuildMatcher() {
@@ -52,6 +55,12 @@ function start(bus) {
       ...(bus.tvHot || []),
       ...((bus.newsRadar && bus.newsRadar.trumpAssets && bus.newsRadar.trumpAssets.syms) || []),  // his holdings always tracked
     ]);
+    // EXPAND coverage far beyond the ~89 actively-scanned names: pull in the conviction
+    // leaderboard + a broad slice of the 16k universe so news about ANY major listed
+    // company is detected, not just a handful. Capped so matching stays fast.
+    const ranked = bus.rankScores ? Object.keys(bus.rankScores).sort((a, b) => bus.rankScores[b] - bus.rankScores[a]) : [];
+    for (const s of ranked) { if (tracked.size >= 1200) break; tracked.add(s); }
+    if (tracked.size < 400) for (const u of (bus.universe || [])) { if (tracked.size >= 900) break; tracked.add(u.y); }
     const key = [...tracked].sort().join(',').slice(0, 500) + ':' + tracked.size;
     if (key === matcherKey) return;
     matcherKey = key;
@@ -70,6 +79,9 @@ function start(bus) {
       } catch (e) { /* skip un-compilable names */ }
     }
     matcher = built;
+    // sector index so theme/macro stories hit only the TOP few names per sector (not all)
+    bySector = {};
+    for (const m of built) { const s = sectorOf(m.sym); (bySector[s] = bySector[s] || []).push(m); }
     bus.newsCorrStatus.tracked = built.length;
   }
 
@@ -90,69 +102,55 @@ function start(bus) {
     rebuildMatcher();
 
     const now = Date.now();
-    const active = radar.headlines.filter(h => (now - (h.at || now)) < HEADLINE_TTL);
-    const correlations = [];
-    const impactAcc = {};    // sym -> [contributions]
+    // INCREMENTAL: only process headlines newer than the last we handled. This is what
+    // makes it truly LIVE (each story correlated the moment it lands) and kills the lag
+    // from re-scanning the whole 6h window against the matcher every 2 seconds.
+    const fresh = radar.headlines.filter(h => (h.at || 0) > lastAt);
+    if (radar.headlines.length) lastAt = Math.max(lastAt, ...radar.headlines.map(h => h.at || 0));
     let withTV = 0;
 
+    const out = [];
     const push = (sym, name, h, base, why) => {
       const tv = tvFor(sym);
-      // fold the chart in: if TradingView agrees with the news direction, amplify;
-      // if it fights it, damp. This is the "news + technicals" educated read.
-      let strength = base;
-      let tvNote = '';
-      if (tv) {
-        withTV++;
-        const agree = Math.sign(tv.rec) === Math.sign(base);
-        strength = base * (agree ? 1.25 : 0.6);
-        tvNote = ` · chart ${tv.label}(${tv.rec > 0 ? '+' : ''}${tv.rec}) ${agree ? 'AGREES' : 'DISAGREES'}`;
-      }
+      let strength = base, tvNote = '';
+      if (tv) { withTV++; const agree = Math.sign(tv.rec) === Math.sign(base); strength = base * (agree ? 1.25 : 0.6);
+        tvNote = ` · chart ${tv.label}(${tv.rec > 0 ? '+' : ''}${tv.rec}) ${agree ? 'AGREES' : 'DISAGREES'}`; }
       strength = Math.max(-1, Math.min(1, strength));
-      (impactAcc[sym] = impactAcc[sym] || []).push(strength);
-      correlations.push({
-        sym, name, headline: h.title.slice(0, 140), source: h.source,
+      out.push({ sym, name, headline: h.title.slice(0, 140), url: h.url || '', source: h.source,
         sentiment: h.score, tv: tv ? tv.label : null, direction: dirWord(strength),
-        strength: +strength.toFixed(2), open: marketOpen(sym),
-        why: `${why}${tvNote}`, at: h.at || now,
-      });
+        strength: +strength.toFixed(2), open: marketOpen(sym), why: `${why}${tvNote}`, at: h.at || now });
     };
 
-    for (const h of active) {
-      if (Math.abs(h.score) < 0.12 && !(h.entities && h.entities.length)) continue;  // skip pure noise
+    for (const h of fresh) {
+      if (Math.abs(h.score) < 0.1 && !(h.entities && h.entities.length)) continue;
       let named = false;
-      // (1) DIRECT company mentions — strongest, most specific signal
       for (const m of matcher) {
-        if (m.re.test(h.title)) {
-          named = true;
-          push(m.sym, m.name, h, h.score * 0.85, `"${h.title.slice(0, 70)}" directly names ${m.name} (${h.source})`);
-        }
+        if (m.re.test(h.title)) { named = true; push(m.sym, m.name, h, h.score * 0.85, `directly names ${m.name} (${h.source})`); }
       }
-      // (2) THEME/SECTOR propagation — for macro stories that name no single company
+      // theme/macro propagation — hit only the TOP few names per affected sector (bounded)
       if (!named) {
         for (const [tname, t] of Object.entries(THEMES)) {
           if (!t.re.test(h.title)) continue;
-          for (const [sec, sign] of Object.entries(t.hits)) {
-            // apply to tracked names in that sector
-            for (const m of matcher) {
-              if (sectorOf(m.sym) !== sec) continue;
+          for (const [sec, sign] of Object.entries(t.hits))
+            for (const m of (bySector[sec] || []).slice(0, 4))
               push(m.sym, m.name, h, h.score * sign * 0.4, `${tname} story → ${t.note} (${h.source})`);
-            }
-          }
         }
       }
     }
 
-    // aggregate per-symbol impact (mean of contributions, recency already bounded by TTL)
+    // merge fresh into the rolling list, drop expired, cap; newest-strongest first
+    rolling = [...out, ...rolling].filter(c => (now - c.at) < HEADLINE_TTL).slice(0, 400);
+
+    // per-symbol live impact = mean strength across the rolling window
+    const acc = {};
+    for (const c of rolling) (acc[c.sym] = acc[c.sym] || []).push(c.strength);
     const impact = {};
-    for (const [sym, arr] of Object.entries(impactAcc)) {
-      impact[sym] = +(arr.reduce((a, b) => a + b, 0) / arr.length).toFixed(2);
-    }
+    for (const [sym, arr] of Object.entries(acc)) impact[sym] = +(arr.reduce((a, b) => a + b, 0) / arr.length).toFixed(2);
     bus.newsImpact = impact;
 
-    // sort the human feed: strongest & freshest first; keep a rolling window
-    correlations.sort((a, b) => (Math.abs(b.strength) - Math.abs(a.strength)) || (b.at - a.at));
-    bus.newsCorrelations = correlations.slice(0, 120);
-    bus.newsCorrStatus = { active: correlations.length, tracked: matcher.length, withTV, updated: new Date().toLocaleTimeString() };
+    const sorted = [...rolling].sort((a, b) => (b.at - a.at) || (Math.abs(b.strength) - Math.abs(a.strength)));
+    bus.newsCorrelations = sorted.slice(0, 160);
+    bus.newsCorrStatus = { active: rolling.length, distinct: Object.keys(acc).length, tracked: matcher.length, withTV, updated: new Date().toLocaleTimeString() };
   }
 
   setInterval(correlate, TICK_MS);

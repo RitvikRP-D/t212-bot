@@ -239,7 +239,7 @@ function snapshot() {
     newsRadar: bus.newsRadar ? { global: bus.newsRadar.global, sources: bus.newsRadar.sources, channels: bus.newsRadar.channels, total: bus.newsRadar.total, perTick: bus.newsRadar.perTick, cycles: bus.newsRadar.cycles, updated: bus.newsRadar.updated, byRegion: bus.newsRadar.byRegion, byEntity: bus.newsRadar.byEntity, bySource: bus.newsRadar.bySource, categories: bus.newsRadar.categories, headlines: (bus.newsRadar.headlines || []).slice(0, 80), trumpFeed: (bus.newsRadar.trumpFeed || []).slice(0, 20), cryptoFeed: (bus.newsRadar.cryptoFeed || []).slice(0, 20), cryptoByCoin: bus.newsRadar.cryptoByCoin, warBoard: bus.newsRadar.warBoard, warNarrative: bus.newsRadar.warNarrative } : null,
     newsBrain: bus.newsBrain ? { themes: bus.newsBrain.themes, sectors: bus.newsBrain.sectors, top: bus.newsBrain.top, calls: bus.newsBrain.calls, holdings: bus.newsBrain.holdings, narrative: bus.newsBrain.narrative, updated: bus.newsBrain.updated } : null,
     newsBridge: bus.newsBridge ? { aligned: bus.newsBridge.aligned, conflicts: bus.newsBridge.conflicts, updated: bus.newsBridge.updated } : null,
-    newsCorrelations: bus.newsCorrelations ? bus.newsCorrelations.slice(0, 60) : null,
+    newsCorrelations: bus.newsCorrelations ? bus.newsCorrelations.slice(0, 140) : null,
     newsCorrStatus: bus.newsCorrStatus || null,
     openBell: bus.openBell ? { lastOpened: bus.openBell.lastOpened, history: bus.openBell.history } : null,
     trumpAssets: (bus.newsRadar && bus.newsRadar.trumpAssets) || null,
