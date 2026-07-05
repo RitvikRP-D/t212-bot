@@ -62,12 +62,59 @@ function start(bus) {
     return s + 's';
   }
 
+    // one-line plain-English JOB for each agent (what it's FOR), shown on the dashboard
+    // next to its live activity so the fleet page actually means something.
+    const DESC = {
+      'scanner': 'Scans all ~16k instruments every minute for entry setups',
+      'crypto': 'Scans 50 coins on Binance 1-min data + maps them to T212 ETPs',
+      'commodities': 'Tracks gold/silver/oil/copper etc. via futures + ETC mapping',
+      'historian': 'Reads each name\'s history back to 1927 for the long-term trend',
+      'ranker': 'Grades the whole universe into a conviction leaderboard',
+      'marketmap': 'Knows which venues (London/US/Asia…) are open right now',
+      'tv-stocks': 'Pulls 122 TradingView metrics/name across 8 stock markets',
+      'tv-crypto': 'Pulls multi-timeframe TradingView ratings for every coin',
+      'fundamentals': 'Fetches P/E, growth, debt, margins, yields for ~6k names',
+      'regime': 'Reads the tape regime (trend/chop/shock) + volatility',
+      'pine': 'Generates a Pine v5 script per name + confluence score',
+      'earnings': 'Tracks the earnings calendar so it can avoid report-day risk',
+      'news-radar': 'Sweeps ~690 world news channels 24/7 for anything market-moving',
+      'news-brain': 'Reads the news and says what it means + which sectors move',
+      'news-correlate': 'Maps every headline to the exact stocks it hits + direction',
+      'news-bridge': 'Feeds the interpreted news into the trader\'s vote',
+      'market-news': 'Fear&Greed + headlines + congressional trades feed',
+      'deep-news': 'Deep-reads the serious financial press (FT/Economist/Bloomberg)',
+      'crypto-news': 'Dedicated crypto news desk + per-coin sentiment',
+      'open-bell': 'Re-analyses everything the instant a market opens',
+      'trump-desk': 'Tracks Trump-linked stocks, his posts + policy → tradeable signal',
+      'quiver': 'Congress trades + gov contracts (Quiver, when a key is active)',
+      'desk·screener': 'Goldman-style quality+value screen of the whole market',
+      'desk·valuation': 'Morgan-Stanley-style DCF fair-value on holdings + picks',
+      'desk·risk': 'Bridgewater-style portfolio risk: correlation, concentration, stress',
+      'desk·earnings': 'JPMorgan-style pre-earnings briefs on names reporting soon',
+      'desk·portfolio': 'BlackRock-style target allocation for your account size',
+      'desk·tech': 'Citadel-style technical trade plans (support/resistance/targets)',
+      'desk·dividend': 'Harvard-endowment-style income/dividend-safety screen',
+      'desk·moat': 'Bain-style competitive-moat analysis by sector',
+      'desk·patterns': 'RenTech-style statistical-edge memos from history + tape',
+      'desk·macro': 'McKinsey-style macro → sector over/underweight calls',
+      'trader': 'Places + manages the actual T212 orders on a 50-agent consensus',
+      'allocator': 'Queues high-conviction ideas overnight to fire at the bell',
+      'logger': 'Logs every trade to xlsx/csv/Google Sheet',
+      'alerts': 'Emails you on fills and risk events',
+      'risk-guardian': 'Enforces the 10% floor, daily breaker + auto-baseline',
+      'medic': 'Self-heals the fleet + restarts on crashes',
+      'sentinel': 'Constant integrity checks + auto-repair',
+      'auditor': 'Audits every execution for slippage/errors',
+      'perf': 'Scores which agents\' votes actually preceded winners',
+      'heartbeat': 'Watches that every critical agent is still ticking',
+    };
+
   function cycle() {
     const agents = [];
     for (const [group, name, fn] of REG) {
       let doing = null;
       try { doing = fn(bus); } catch (e) { doing = null; }
-      agents.push({ group, name, doing: doing || 'warming up…', alive: !!doing });
+      agents.push({ group, name, desc: DESC[name] || '', doing: doing || 'warming up…', alive: !!doing });
     }
     const healthy = agents.filter(a => a.alive).length;
     bus.fleet = { agents, groups: [...new Set(agents.map(a => a.group))], healthy, total: agents.length, updated: new Date().toLocaleTimeString() };

@@ -46,6 +46,16 @@ const ENTITIES = {
   mna: /merger|acquisition|buyout|takeover|acquire[sd]?/i,
 };
 
+// MARKET-RELEVANCE gate. Google-News mirrors sometimes leak an outlet's non-money items
+// (sport, lifestyle, quizzes). A headline is kept only if it reads like market/econ/policy
+// news — it names a tagged entity, OR hits this money lexicon, OR carries a $/£/€/% figure.
+const MONEY = /\b(stock|shares?|equit|market|econom|earnings|revenue|profit|guidance|dividend|ipo|merger|acquisition|buyout|nasdaq|dow|s&p|ftse|nikkei|dax|sensex|hang seng|gdp|inflation|cpi|rate cut|rate hike|interest rate|central bank|fed|ecb|treasury|bond|yield|tariff|trade deal|oil|crude|brent|opec|gold|copper|commodit|bitcoin|crypto|ethereum|currency|dollar|euro|yen|yuan|rupee|forex|bank|hedge fund|valuation|analyst|upgrade|downgrade|price target|quarter|fiscal|recession|layoff|jobs report|unemployment|semiconductor|chip|\bAI\b)\b/i;
+const MONEYSYM = /[$£€]\s?\d|\d+(\.\d+)?\s?(%|bn|billion|million|trillion|bps)/i;
+function marketRelevant(title, entities) {
+  if (entities && entities.length) return true;                 // already themed (fed/war/crypto/…)
+  return MONEY.test(title) || MONEYSYM.test(title);
+}
+
 // WAR / GEOPOLITICS → COMMODITY & SECTOR playbook. When conflict flares, this is the
 // chain of consequence the desk narrates and maps onto tradeable names.
 const WAR_CHAINS = [
@@ -77,14 +87,15 @@ function start(bus) {
     results.forEach((res, i) => {
       const [, source, region] = slice[i];
       if (res.status !== 'fulfilled' || !res.value.length) return;
-      liveSources.set(source, at);
       for (const it of res.value) {
         const key = it.title.slice(0, 80).toLowerCase();
         if (seen.has(key)) continue;
-        seen.set(key, at);
-        const score = scoreHeadline(it.title, source);
         const entities = [];
         for (const [name, re] of Object.entries(ENTITIES)) if (re.test(it.title)) entities.push(name);
+        if (!marketRelevant(it.title, entities)) continue;   // drop non-market fluff at the door
+        seen.set(key, at);
+        liveSources.set(source, at);                          // count a source live only when it yields RELEVANT news
+        const score = scoreHeadline(it.title, source);
         fresh.push({ title: it.title, source, region, score, entities, at });
       }
     });
@@ -129,9 +140,34 @@ function start(bus) {
     bus.newsRadar.byEntity = agg(h => h.entities.length ? h.entities : []);
     bus.newsRadar.bySource = agg(h => h.source);
 
+    // CATEGORY BUCKETS — a clean, human view: each theme with its mood, count + top stories.
+    // This is what the dashboard shows instead of a raw firehose, so the radar reads clearly.
+    const CATS = [
+      ['Markets & economy', h => /market|stock|share|econom|gdp|earnings|nasdaq|ftse|dow|s&p|index/i.test(h.title)],
+      ['Fed & rates', h => h.entities.includes('fed') || h.entities.includes('ecb') || h.entities.includes('boe') || /inflation|cpi|rate|yield/i.test(h.title)],
+      ['War & geopolitics', h => h.entities.includes('war') || h.entities.includes('defense')],
+      ['Oil & commodities', h => h.entities.includes('opec') || h.entities.includes('gold') || /oil|crude|copper|gas|metal|wheat/i.test(h.title)],
+      ['Crypto', h => h.entities.includes('crypto') || h.region === 'CRYPTO'],
+      ['Tariffs & trade', h => h.entities.includes('tariff')],
+      ['China & Asia', h => h.entities.includes('china') || ['CHINA', 'JAPAN', 'KOREA', 'SEA', 'INDIA'].includes(h.region)],
+      ['AI & tech', h => h.entities.includes('ai')],
+      ['Earnings & M&A', h => h.entities.includes('earnings') || h.entities.includes('mna')],
+      ['Trump & policy', h => h.entities.includes('trump')],
+    ];
+    bus.newsRadar.categories = CATS.map(([name, fn]) => {
+      const hs = all.filter(fn);
+      return { name, n: hs.length, score: hs.length ? +(hs.reduce((a, h) => a + h.score, 0) / hs.length).toFixed(2) : 0, top: hs.slice(0, 8).map(h => ({ title: h.title, source: h.source, score: h.score, region: h.region, at: h.at })) };
+    }).filter(c => c.n > 0).sort((a, b) => b.n - a.n);
+
     // dedicated lanes
     bus.newsRadar.trumpFeed = all.filter(h => h.entities.includes('trump') || h.source === 'TruthSocial' || h.source === 'TrumpDesk' || h.source === 'WhiteHouse').slice(0, 40);
-    bus.newsRadar.cryptoFeed = all.filter(h => h.entities.includes('crypto') || h.region === 'CRYPTO').slice(0, 40);
+    // CRYPTO news mapped per coin — so the Crypto tab shows which coins the world is talking about
+    const cryptoHeads = all.filter(h => h.entities.includes('crypto') || h.region === 'CRYPTO');
+    bus.newsRadar.cryptoFeed = cryptoHeads.slice(0, 40);
+    const COIN_RE = { BTC: /bitcoin|\bbtc\b/i, ETH: /ethereum|\beth\b/i, SOL: /\bsolana\b|\bsol\b/i, XRP: /\bxrp\b|ripple/i, DOGE: /dogecoin|\bdoge\b/i, BNB: /\bbnb\b|binance coin/i, ADA: /cardano|\bada\b/i };
+    const coinAgg = {};
+    for (const h of cryptoHeads) for (const [c, re] of Object.entries(COIN_RE)) if (re.test(h.title)) (coinAgg[c] = coinAgg[c] || []).push(h);
+    bus.newsRadar.cryptoByCoin = Object.entries(coinAgg).map(([coin, hs]) => ({ coin, n: hs.length, score: +(hs.reduce((a, h) => a + h.score, 0) / hs.length).toFixed(2), top: hs.slice(0, 3).map(h => ({ title: h.title, source: h.source, score: h.score })) })).sort((a, b) => b.n - a.n);
     bus.newsRadar.trumpAssets = {
       assets: TRUMP_ASSETS, syms: TRUMP_ASSETS.map(a => a.sym),
       headlines: all.filter(h => h.source === 'TrumpDesk' || /trump media|\bDJT\b|world liberty|\$TRUMP|trump organization|trump family/i.test(h.title)).slice(0, 20),
