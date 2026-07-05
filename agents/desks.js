@@ -277,15 +277,19 @@ function start(bus) {
     };
   }
 
-  // ── scheduler: each desk on its own clock, each visible to medic via beat ──
+  // ── scheduler: SYNCED CADENCE. All desks read already-computed bus data (fundamentals,
+  // TV ratings, history) so they're cheap to run often. Two synced tiers replace the old
+  // 60–600s spread: FAST=30s for the live-tape desks, MED=45s for heavier model/landscape.
+  const FAST = 30e3, MED = 45e3;
   const DESKS = [
-    ['desk-screener', screener, 90e3], ['desk-valuation', valuation, 180e3], ['desk-risk', riskdesk, 120e3],
-    ['desk-earnings', earningsdesk, 300e3], ['desk-portfolio', portfolio, 300e3], ['desk-tech', techdesk, 60e3],
-    ['desk-dividend', dividend, 300e3], ['desk-moat', moat, 600e3], ['desk-patterns', patterns, 240e3], ['desk-macro', macro, 120e3],
+    ['desk-screener', screener, FAST], ['desk-valuation', valuation, MED], ['desk-risk', riskdesk, FAST],
+    ['desk-earnings', earningsdesk, MED], ['desk-portfolio', portfolio, MED], ['desk-tech', techdesk, FAST],
+    ['desk-dividend', dividend, MED], ['desk-moat', moat, MED], ['desk-patterns', patterns, FAST], ['desk-macro', macro, FAST],
   ];
+  let stagger = 0;
   for (const [name, fn, ms] of DESKS) {
     setInterval(() => { try { if (bus.beat) bus.beat(name); fn(); } catch (e) { console.log(`[${name}] ${e.message}`); } }, ms);
-    setTimeout(() => { try { fn(); } catch (e) {} }, 20000 + Math.floor(ms / 10));
+    setTimeout(() => { try { fn(); } catch (e) {} }, 15000 + (stagger += 1500));  // stagger first run so they don't all fire at once
   }
   console.log('[desks] 10 institutional desks armed — Goldman screener · MS DCF · Bridgewater risk · JPM earnings · BlackRock portfolio · Citadel TA · Harvard dividend · Bain moat · RenTech patterns · McKinsey macro');
 }

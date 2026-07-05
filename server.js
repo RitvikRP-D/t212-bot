@@ -181,7 +181,8 @@ require('./agents/regime').start(bus);      // ㉑ market regime + volatility de
 require('./agents/trader').start(bus);      // ③ the trader (T212 practice orders)
 require('./agents/perf').start(bus);        // ㉒ performance monitor + per-agent scorecard
 require('./agents/auditor').start(bus);     // ㉓ execution auditor + integrity watch
-require('./agents/heartbeat').start(bus);   // ㉔ fleet liveness monitor
+require('./agents/heartbeat').start(bus);   // ㉔ fleet liveness monitor (critical-agent alerts → bus.fleetProbe)
+require('./agents/fleet').start(bus);       // 🖥 live per-agent board — every agent's real-time activity → bus.fleet
 require('./agents/allocator').start(bus);   // ⑰ overnight order queue → fires at the bell
 require('./agents/sentinel').start(bus);    // ⑨ constant checker / auto-repair
 require('./agents/medic').start(bus);       // ⑧ self-healer / fleet supervisor
@@ -213,8 +214,12 @@ function snapshot() {
         tvLabel: tvr ? tvr.label : null, tvRec: tvr ? +tvr.rec.toFixed(2) : null, tvName: tvr ? tvr.tvName : null };
     });
   const cryptoTop = Object.entries(bus.crypto || {}).filter(([, v]) => v.price)
-    .sort((a, b) => (b[1].conf || 0) - (a[1].conf || 0)).slice(0, 12)
-    .map(([coin, v]) => ({ coin, price: v.price, pct24h: v.pct24h, rsi: v.rsi, conf: v.conf || 0, why: v.why, etp: v.etp || null }));
+    .sort((a, b) => (b[1].conf || 0) - (a[1].conf || 0)).slice(0, 40)
+    .map(([coin, v]) => {
+      const tv = bus.tvCrypto && bus.tvCrypto[coin];
+      return { coin, price: v.price, pct24h: v.pct24h, rsi: v.rsi, conf: v.conf || 0, why: v.why, etp: v.etp || null,
+        tvLabel: tv ? tv.label : null, tvRec: tv ? tv.rec : null, tvDetail: tv ? tv.detail : null };
+    });
   const commodTop = Object.entries(bus.commod || {}).filter(([, v]) => v.price)
     .sort((a, b) => (b[1].conf || 0) - (a[1].conf || 0)).slice(0, 12)
     .map(([key, v]) => ({ key, price: v.price, pct24h: v.pct24h, rsi: v.rsi, conf: v.conf || 0, etp: v.etp || null, etpName: v.etpName || null }));
@@ -228,8 +233,8 @@ function snapshot() {
     historian: bus.histStatus, ranker: bus.rankStatus, marketMap: bus.marketMap, alloc: bus.allocStatus,
     earnings: { count: (bus.earnings || {}).count, updated: (bus.earnings || {}).updated }, alerts: bus.alertStatus,
     pine: bus.pineStatus, regime: bus.regime, perf: bus.perf, audit: bus.audit, fleet: bus.fleet,
-    newsRadar: bus.newsRadar ? { global: bus.newsRadar.global, sources: bus.newsRadar.sources, total: bus.newsRadar.total, updated: bus.newsRadar.updated, byRegion: bus.newsRadar.byRegion, byEntity: bus.newsRadar.byEntity, headlines: (bus.newsRadar.headlines || []).slice(0, 30), trumpFeed: (bus.newsRadar.trumpFeed || []).slice(0, 12) } : null,
-    newsBrain: bus.newsBrain ? { themes: bus.newsBrain.themes, top: bus.newsBrain.top, updated: bus.newsBrain.updated } : null,
+    newsRadar: bus.newsRadar ? { global: bus.newsRadar.global, sources: bus.newsRadar.sources, channels: bus.newsRadar.channels, total: bus.newsRadar.total, perTick: bus.newsRadar.perTick, cycles: bus.newsRadar.cycles, updated: bus.newsRadar.updated, byRegion: bus.newsRadar.byRegion, byEntity: bus.newsRadar.byEntity, headlines: (bus.newsRadar.headlines || []).slice(0, 60), trumpFeed: (bus.newsRadar.trumpFeed || []).slice(0, 15), cryptoFeed: (bus.newsRadar.cryptoFeed || []).slice(0, 15), warBoard: bus.newsRadar.warBoard, warNarrative: bus.newsRadar.warNarrative } : null,
+    newsBrain: bus.newsBrain ? { themes: bus.newsBrain.themes, sectors: bus.newsBrain.sectors, top: bus.newsBrain.top, calls: bus.newsBrain.calls, holdings: bus.newsBrain.holdings, narrative: bus.newsBrain.narrative, updated: bus.newsBrain.updated } : null,
     newsBridge: bus.newsBridge ? { aligned: bus.newsBridge.aligned, conflicts: bus.newsBridge.conflicts, updated: bus.newsBridge.updated } : null,
     newsCorrelations: bus.newsCorrelations ? bus.newsCorrelations.slice(0, 60) : null,
     newsCorrStatus: bus.newsCorrStatus || null,

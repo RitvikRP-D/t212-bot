@@ -6,7 +6,9 @@
 // already restarts the process on heap blowups — this is the "is each brain still ticking?"
 // layer that catches a wedged agent the process-level watchdog would miss.
 function start(bus) {
-  bus.fleet = { agents: [], silent: [], ok: true, updated: null };
+  // NB: the live per-agent board is owned by agents/fleet.js (bus.fleet). This monitor
+  // publishes bus.fleetProbe (critical-agent liveness + alerts) which fleet.js surfaces.
+  bus.fleetProbe = { agents: [], silent: [], ok: true, updated: null };
   const alerted = new Set();
   // probe = [displayName, staleAfterMs, critical, ()=>lastActivityMs|null]
   const now = () => Date.now();
@@ -46,7 +48,7 @@ function start(bus) {
         if (critical && bus.notify && !alerted.has(key)) { alerted.add(key); bus.notify(`❌ Agent "${name}" went silent (${Math.round(age / 1000)}s) — fleet degraded.`); }
       }
     }
-    bus.fleet = { agents, silent, ok: silent.length === 0, updated: new Date().toLocaleTimeString() };
+    bus.fleetProbe = { agents, silent, ok: silent.length === 0, updated: new Date().toLocaleTimeString() };
   }
   setInterval(cycle, 15e3);
   setTimeout(cycle, 40e3);   // let everything boot first

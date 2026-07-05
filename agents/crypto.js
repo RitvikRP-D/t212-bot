@@ -7,7 +7,8 @@
 const { CRYPTO_MS } = require('../config');
 const { calcRSI, calcMACD, extendedMetrics, evaluate } = require('../lib/indicators');
 
-const COINS = ['BTC','ETH','SOL','BNB','XRP','ADA','DOGE','AVAX','DOT','LINK','LTC','UNI','ATOM','XLM','ETC','FIL','APT','ARB','OP','NEAR','INJ','SUI','TIA','SEI','FET','RNDR','TON','TRX','SHIB','PEPE'];
+const COINS = ['BTC','ETH','SOL','BNB','XRP','ADA','DOGE','AVAX','DOT','LINK','LTC','UNI','ATOM','XLM','ETC','FIL','APT','ARB','OP','NEAR','INJ','SUI','TIA','SEI','FET','RNDR','TON','TRX','SHIB','PEPE',
+  'POL','ICP','HBAR','VET','ALGO','GRT','AAVE','MKR','RUNE','IMX','STX','WIF','BONK','FLOKI','JUP','PYTH','ONDO','ENA','LDO','CRV'];
 // coin -> regexes matched against T212 instrument names to find its tradable ETP
 const ETP_RE = {
   BTC: /bitcoin/i, ETH: /ethereum/i, SOL: /\bsolana\b/i, XRP: /\bxrp|ripple\b/i,

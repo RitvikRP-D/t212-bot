@@ -65,6 +65,16 @@
   .bar{height:5px;border-radius:3px;background:var(--line);overflow:hidden;margin-top:3px;}
   .bar > i{display:block;height:100%;}
   .chip{display:inline-block;font-size:9.5px;padding:2px 7px;border-radius:12px;margin:2px 3px 0 0;background:#152030;}
+  .chip.green{background:#0f2e1e;color:var(--green);} .chip.red{background:#3a1015;color:#ff9aa5;} .chip.amber{background:#3a2a10;color:var(--amber);} .chip.muted{color:var(--muted);}
+  .narr{background:linear-gradient(135deg,#101a2a,#0d1420);border:1px solid #1c2b40;border-radius:12px;padding:14px;font-size:13px;line-height:1.6;color:#dfe9f5;}
+  .heatrow{display:flex;align-items:center;gap:8px;margin:3px 0;font-size:11px;}
+  .heatrow .lbl{width:88px;color:var(--muted);text-transform:capitalize;}
+  .heatrow .bar{height:9px;border-radius:5px;}
+  .war{background:#1c1210;border:1px solid #4a2410;border-radius:12px;padding:12px;}
+  .warchain{border-left:3px solid var(--amber);padding:6px 10px;margin:6px 0;background:#22160e;border-radius:0 8px 8px 0;}
+  .grp{grid-column:1/-1;font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin:10px 0 2px;border-bottom:1px solid var(--line);padding-bottom:3px;}
+  .ag .doing{color:var(--muted);font-size:9px;line-height:1.3;margin-top:2px;display:block;}
+  .callrow{display:flex;gap:8px;align-items:baseline;padding:6px 0;border-bottom:1px solid var(--line);font-size:11px;}
   .toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:#12324a;color:#fff;padding:11px 18px;border-radius:10px;font-size:13px;font-weight:600;box-shadow:0 6px 24px rgba(0,0,0,.5);opacity:0;transition:opacity .3s;z-index:99;}
   .toast.show{opacity:1;}
   .tabs{display:flex;gap:6px;margin-bottom:12px;overflow-x:auto;}
@@ -109,6 +119,8 @@
     <div class="tab" data-t="news" onclick="tab('news')">📰 News Radar</div>
     <div class="tab" data-t="corr" onclick="tab('corr')">🎯 News→Stocks</div>
     <div class="tab" data-t="brain" onclick="tab('brain')">🧠 News Brain</div>
+    <div class="tab" data-t="crypto" onclick="tab('crypto')">₿ Crypto</div>
+    <div class="tab" data-t="trump" onclick="tab('trump')">🇺🇸 Trump</div>
     <div class="tab" data-t="positions" onclick="tab('positions')">Positions</div>
     <div class="tab" data-t="desks" onclick="tab('desks')">🏦 Desks</div>
     <div class="tab" data-t="agents" onclick="tab('agents')">All Agents</div>
@@ -126,10 +138,11 @@
 
   <!-- NEWS RADAR -->
   <section id="s-news">
-    <h2>🅐 Trump Lane <span class="u">his posts + everything quoting him</span></h2>
-    <div class="panel"><div class="feed" id="trump"></div></div>
-    <h2>🅐 Global News Radar <span class="u" id="radar-u"></span></h2>
+    <h2>⚔️ War → Commodity Watch <span class="u">geopolitics maps to oil, gold, defence, freight, grain</span></h2>
+    <div class="panel war" id="warboard">calm tape — no active geopolitical commodity chain</div>
+    <h2>🌍 Global News Radar <span class="u" id="radar-u"></span></h2>
     <div class="panel">
+      <div class="muted" style="font-size:10px;margin-bottom:6px;">Regions (avg mood · story count) — click-free live grid</div>
       <div id="regionchips" style="margin-bottom:10px;"></div>
       <div class="feed" id="radarfeed"></div>
     </div>
@@ -144,15 +157,37 @@
 
   <!-- NEWS BRAIN -->
   <section id="s-brain">
-    <h2>🅑 What the news means <span class="u" id="brain-u"></span></h2>
+    <h2>🧠 What's driving markets right now <span class="u" id="brain-u"></span></h2>
+    <div class="panel narr" id="narrative">reading the tape…</div>
+    <h2>🔥 Sector heatmap <span class="u">how the news is pushing each sector</span></h2>
+    <div class="panel" id="heatmap">gathering…</div>
+    <h2>🎯 Actionable calls <span class="u">strongest leans, cross-checked vs the chart</span></h2>
+    <div class="panel"><div class="feed" id="calls"></div></div>
+    <h2>📊 Themes & top-leaned names</h2>
     <div class="panel"><div id="themes" style="margin-bottom:12px;"></div>
       <table><thead><tr><th>Symbol</th><th>Lean</th><th>Why</th></tr></thead><tbody id="braintop"></tbody></table>
     </div>
-    <h2>🅒 News vs your holdings</h2>
-    <div class="grid2">
-      <div class="panel"><div class="muted" style="font-size:10px;margin-bottom:6px;">✓ NEWS AGREES</div><div id="aligned" class="muted">—</div></div>
-      <div class="panel"><div class="muted" style="font-size:10px;margin-bottom:6px;">⚠ NEWS FIGHTS</div><div id="conflicts" class="muted">—</div></div>
-    </div>
+    <h2>🅒 News vs your holdings <span class="u">every open position, does the news back it?</span></h2>
+    <div class="panel" id="holdingsread">no open positions</div>
+  </section>
+
+  <!-- CRYPTO -->
+  <section id="s-crypto">
+    <h2>₿ Crypto — 24/7 live <span class="u" id="crypto-u"></span></h2>
+    <div class="panel" style="font-size:10px;color:var(--muted);margin-bottom:8px;">Every coin scanned on Binance 1-min AND rated by the TradingView crypto analyst across 6 timeframes (~10.5k metrics/coin). Crypto never closes — these trade any time via T212 ETPs where mapped.</div>
+    <div class="panel"><div class="feed"><table><thead><tr><th>Coin</th><th>Price</th><th>24h</th><th>RSI</th><th>Bot conf</th><th>TradingView</th><th>ETP</th></tr></thead><tbody id="cryptotable"></tbody></table></div></div>
+    <h2>📰 Crypto news lane</h2>
+    <div class="panel"><div class="feed" id="cryptonews"></div></div>
+  </section>
+
+  <!-- TRUMP -->
+  <section id="s-trump">
+    <h2>🇺🇸 Everything Trump <span class="u" id="trump-u">posts · policy · portfolio</span></h2>
+    <div class="panel" style="font-size:10px;color:var(--muted);margin-bottom:8px;">A dedicated desk for the single most market-moving account on earth: his Truth Social posts and every outlet quoting him, what he/his family actually own, and how the fleet routes it into trades.</div>
+    <h2>💼 What he & family own (tradeable)</h2>
+    <div class="panel" id="trumpassets2">gathering…</div>
+    <h2>🗣 His posts + everything quoting him</h2>
+    <div class="panel"><div class="feed" id="trump"></div></div>
   </section>
 
   <!-- POSITIONS -->
@@ -267,6 +302,7 @@ async function blacklist(sym,action){ sym=(sym||'').trim().toUpperCase(); if(!sy
 async function rescan(){ try{ const r=await fetch(API_BASE+'/api/rescan',{method:'POST',mode:'cors'}); const d=await r.json(); toast('🔄 re-analysing '+(d.rescanned||0)+' names'); }catch(e){ toast('⚠️ could not reach bot'); } }
 function scoreColor(s){ return s>0.3?'green':s<-0.3?'red':'muted'; }
 function biasBar(v){ const w=Math.min(100,Math.abs(v)*100); const c=v>=0?'var(--green)':'var(--red)'; return `<div class="bar"><i style="width:${w}%;background:${c};margin-left:${v<0?(100-w):50}%"></i></div>`; }
+function confBar(v){ v=Number(v||0); const w=Math.round(Math.min(1,Math.max(0,v))*100); const c=v>=0.63?'var(--green)':v>=0.4?'var(--amber)':'#3a4658'; return `<span style="display:inline-block;width:44px;height:8px;border-radius:4px;background:#1a2434;vertical-align:middle;position:relative;"><span style="position:absolute;left:0;top:0;height:8px;width:${w}%;background:${c};border-radius:4px;"></span></span> <span style="font-size:9px;" class="muted">${w}%</span>`; }
 
 let lastData=null;
 function render(d){
@@ -311,15 +347,27 @@ function render(d){
      <td class="${(s.lastConf>=0.6)?'green':'muted'}">${((s.lastConf||0)*100).toFixed(0)}%</td>
      <td class="muted" style="max-width:150px;overflow:hidden;text-overflow:ellipsis;">${esc(s.lastWhy)}</td></tr>`).join('');
 
-  // TRUMP + RADAR
+  // RADAR + WAR + TRUMP LANE
   if(d.newsRadar){
-    $('radar-u').textContent=(d.newsRadar.sources||0)+' feeds live · '+(d.newsRadar.total||0)+' stories · '+(d.newsRadar.updated||'');
-    $('trump').innerHTML=(d.newsRadar.trumpFeed||[]).length?(d.newsRadar.trumpFeed||[]).map(h=>`
-      <div class="hl"><span class="src trump">${esc(h.source)}</span><span>${esc(h.title)} ${(h.entities||[]).map(e=>`<span class="tag">${e}</span>`).join('')}</span><span class="score ${scoreColor(h.score)}">${(h.score>0?'+':'')+h.score}</span></div>`).join(''):'<div class="muted" style="padding:8px;">No Trump-tagged stories yet this cycle.</div>';
-    // region chips
-    $('regionchips').innerHTML=Object.entries(d.newsRadar.byRegion||{}).map(([r,v])=>`<span class="chip ${scoreColor(v.score)}">${r} ${(v.score>0?'+':'')+v.score} <span class="muted">(${v.n})</span></span>`).join('');
-    $('radarfeed').innerHTML=(d.newsRadar.headlines||[]).map(h=>`
+    const r=d.newsRadar;
+    $('radar-u').textContent=(r.sources||0)+'/'+(r.channels||0)+' channels live · '+(r.total||0)+' stories · +'+(r.perTick||0)+'/tick · cycle '+(r.cycles||0)+' · '+(r.updated||'');
+    // war → commodity board
+    const wb=r.warBoard;
+    if(wb&&wb.active){
+      $('warboard').innerHTML=`<div style="font-size:12px;margin-bottom:8px;color:#ffc`+`9a;">${esc(r.warNarrative||'')}</div>`+
+        (wb.chains||[]).map(c=>`<div class="warchain"><b>${esc(c.commodity)}</b> <span class="muted" style="font-size:10px;">${esc(c.why)}</span><br>
+          ${(c.up||[]).map(s=>`<span class="chip green">▲ ${esc(s)}</span>`).join('')}${(c.down||[]).map(s=>`<span class="chip red">▼ ${esc(s)}</span>`).join('')}</div>`).join('');
+    } else { $('warboard').innerHTML='<span class="muted">'+esc((wb&&r.warNarrative)||'calm tape — no active geopolitical commodity chain')+'</span>'; }
+    // region grid
+    $('regionchips').innerHTML=Object.entries(r.byRegion||{}).sort((a,b)=>b[1].n-a[1].n).map(([rg,v])=>`<span class="chip ${scoreColor(v.score)}">${rg} ${(v.score>0?'+':'')+v.score} <span class="muted">(${v.n})</span></span>`).join('');
+    $('radarfeed').innerHTML=(r.headlines||[]).map(h=>`
       <div class="hl"><span class="src">${esc(h.source)}</span><span>${esc(h.title)} ${(h.entities||[]).slice(0,3).map(e=>`<span class="tag">${e}</span>`).join('')}</span><span class="score ${scoreColor(h.score)}">${(h.score>0?'+':'')+h.score}</span></div>`).join('');
+    // Trump lane (now on its own tab)
+    if($('trump'))$('trump').innerHTML=(r.trumpFeed||[]).length?(r.trumpFeed||[]).map(h=>`
+      <div class="hl"><span class="src trump">${esc(h.source)}</span><span>${esc(h.title)} ${(h.entities||[]).map(e=>`<span class="tag">${e}</span>`).join('')}</span><span class="score ${scoreColor(h.score)}">${(h.score>0?'+':'')+h.score}</span></div>`).join(''):'<div class="muted" style="padding:8px;">No Trump-tagged stories yet this cycle.</div>';
+    // crypto news lane
+    if($('cryptonews'))$('cryptonews').innerHTML=(r.cryptoFeed||[]).length?(r.cryptoFeed||[]).map(h=>`
+      <div class="hl"><span class="src">${esc(h.source)}</span><span>${esc(h.title)}</span><span class="score ${scoreColor(h.score)}">${(h.score>0?'+':'')+h.score}</span></div>`).join(''):'<div class="muted" style="padding:8px;">gathering crypto headlines…</div>';
   }
 
   // NEWS → STOCKS CORRELATIONS
@@ -339,15 +387,23 @@ function render(d){
     }).join(''):'<div class="muted" style="padding:8px;">Correlating headlines against tracked stocks…</div>';
   }
 
-  // NEWS BRAIN
+  // NEWS BRAIN — narrative, heatmap, calls, holdings read
   if(d.newsBrain){
-    $('brain-u').textContent=d.newsBrain.updated||'';
-    $('themes').innerHTML=Object.entries(d.newsBrain.themes||{}).map(([t,v])=>`<span class="chip ${scoreColor(v)}">${t} ${(v>0?'+':'')+Number(v).toFixed(2)}</span>`).join('')||'<span class="muted">gathering…</span>';
-    $('braintop').innerHTML=(d.newsBrain.top||[]).map(t=>`<tr><td style="font-weight:700;">${esc(t.sym)}</td><td class="${cls(t.bias)}" style="width:90px;">${(t.bias>0?'+':'')+t.bias}${biasBar(t.bias)}</td><td class="muted" style="font-size:10px;">${esc(t.why)}</td></tr>`).join('')||'<tr><td class="muted" colspan="3">gathering…</td></tr>';
-  }
-  if(d.newsBridge){
-    $('aligned').innerHTML=(d.newsBridge.aligned||[]).length?(d.newsBridge.aligned||[]).map(a=>`<span class="chip green">${esc(a.sym)} +${a.s}</span>`).join(''):'<span class="muted">—</span>';
-    $('conflicts').innerHTML=(d.newsBridge.conflicts||[]).length?(d.newsBridge.conflicts||[]).map(a=>`<span class="chip red">${esc(a.sym)} ${a.s}</span>`).join(''):'<span class="muted">—</span>';
+    const b=d.newsBrain;
+    $('brain-u').textContent=b.updated||'';
+    if($('narrative'))$('narrative').textContent=b.narrative||'reading the tape…';
+    if($('heatmap'))$('heatmap').innerHTML=(b.sectors||[]).length?(b.sectors||[]).map(s=>{
+      const w=Math.min(100,Math.abs(s.bias)*100), col=s.bias>0.05?'var(--green)':s.bias<-0.05?'var(--red)':'#3a4658';
+      return `<div class="heatrow"><span class="lbl">${esc(s.sector)}</span><span class="bar" style="width:${w}%;background:${col};"></span><span class="${cls(s.bias)}">${(s.bias>0?'+':'')+s.bias}</span></div>`;
+    }).join(''):'<span class="muted">gathering…</span>';
+    if($('calls'))$('calls').innerHTML=(b.calls||[]).length?(b.calls||[]).map(c=>`<div class="callrow">
+      <span class="${c.bias>0?'green':'red'}" style="font-weight:700;width:120px;flex-shrink:0;">${esc(c.action)}</span>
+      <span><b style="color:var(--text)">${esc(c.sym)}</b> <span class="tag">${esc(c.chart)}</span><br><span class="muted" style="font-size:10px;">${esc(c.why)}</span></span></div>`).join(''):'<div class="muted" style="padding:8px;">no high-conviction calls yet</div>';
+    $('themes').innerHTML=Object.entries(b.themes||{}).map(([t,v])=>`<span class="chip ${scoreColor(v)}">${t} ${(v>0?'+':'')+Number(v).toFixed(2)}</span>`).join('')||'<span class="muted">gathering…</span>';
+    $('braintop').innerHTML=(b.top||[]).map(t=>`<tr><td style="font-weight:700;">${esc(t.sym)}</td><td class="${cls(t.bias)}" style="width:90px;">${(t.bias>0?'+':'')+t.bias}${biasBar(t.bias)}</td><td class="muted" style="font-size:10px;">${esc(t.why)}</td></tr>`).join('')||'<tr><td class="muted" colspan="3">gathering…</td></tr>';
+    if($('holdingsread'))$('holdingsread').innerHTML=(b.holdings||[]).length?(b.holdings||[]).map(h=>`<div class="callrow">
+      <span class="${h.bias>0.12?'green':h.bias<-0.12?'red':'muted'}" style="font-weight:700;width:150px;flex-shrink:0;">${esc(h.verdict)}</span>
+      <span><b style="color:var(--text)">${esc(h.sym)}</b> <span class="${cls(h.bias)}">${(h.bias>0?'+':'')+h.bias}</span><br><span class="muted" style="font-size:10px;">${esc(h.why)}</span></span></div>`).join(''):'<span class="muted">no open positions — nothing for the news to agree or fight with yet</span>';
   }
 
   // positions (with per-row manual close)
@@ -397,15 +453,35 @@ function render(d){
   if(d.blacklist){ $('bl-list').innerHTML=(d.blacklist||[]).length?d.blacklist.map(s=>`<span class="chip red">${esc(s)} <b style="cursor:pointer;" onclick="blacklist('${esc(s)}','remove')">✕</b></span>`).join(''):'none blocked'; }
 
   // agents
+  // CRYPTO table (price + TradingView per-coin rating)
+  if(d.crypto&&d.crypto.top){
+    if($('crypto-u'))$('crypto-u').textContent=(d.cryptoTV&&d.cryptoTV.rated?d.cryptoTV.rated+' coins TV-rated · ':'')+(d.crypto.status&&d.crypto.status.coins||d.crypto.top.length)+' scanned';
+    if($('cryptotable'))$('cryptotable').innerHTML=(d.crypto.top||[]).map(c=>`<tr>
+      <td style="font-weight:700;">${esc(c.coin)}</td><td>${px(c.price)}</td>
+      <td class="${cls(c.pct24h)}">${c.pct24h!=null?(c.pct24h>0?'+':'')+Number(c.pct24h).toFixed(1)+'%':'—'}</td>
+      <td class="${c.rsi>70?'red':c.rsi<30?'green':'muted'}">${c.rsi!=null?Number(c.rsi).toFixed(0):'—'}</td>
+      <td>${confBar(c.conf)}</td>
+      <td class="${/BUY/.test(c.tvLabel)?'green':/SELL/.test(c.tvLabel)?'red':'muted'}" style="font-size:10px;">${c.tvLabel?esc(c.tvLabel)+' ('+c.tvRec+')':'—'}</td>
+      <td class="muted" style="font-size:10px;">${c.etp?esc(c.etp):'<span style="opacity:.4">no ETP</span>'}</td></tr>`).join('')||'<tr><td class="muted" colspan="7">scanning…</td></tr>';
+  }
+  // TRUMP assets (his tab)
+  if(d.trumpAssets&&$('trumpassets2')){
+    $('trumpassets2').innerHTML=(d.trumpAssets.assets||[]).map(a=>`<div class="callrow"><span class="chip amber" style="width:80px;flex-shrink:0;"><b>${esc(a.sym)}</b></span><span><b style="color:var(--text)">${esc(a.name)}</b><br><span class="muted" style="font-size:10px;">${esc(a.why)}</span></span></div>`).join('');
+  }
+
+  // FLEET — grouped live board
   if(d.fleet&&d.fleet.agents){
-    $('fleet-u').textContent=(d.fleet.healthy||0)+'/'+(d.fleet.total||0)+' healthy';
-    $('agents').innerHTML=(d.fleet.agents||[]).map(a=>{
-      const st=a.stale?'stale':(a.alive===false?'dead':'');
-      return `<div class="ag ${st}"><b>${esc(a.name)}</b><span class="s">${a.alive===false?'● down':(a.stale?'● slow':'● live')}${a.ageSec!=null?' · '+a.ageSec+'s':''}</span></div>`;
-    }).join('');
+    $('fleet-u').textContent=(d.fleet.healthy||0)+'/'+(d.fleet.total||0)+' agents live · '+(d.fleet.updated||'');
+    const groups={};
+    for(const a of d.fleet.agents){(groups[a.group]=groups[a.group]||[]).push(a);}
+    let html='';
+    for(const g of (d.fleet.groups||Object.keys(groups))){
+      html+=`<div class="grp">${esc(g)} — ${(groups[g]||[]).length}</div>`;
+      html+=(groups[g]||[]).map(a=>`<div class="ag ${a.alive?'':'dead'}"><b>${esc(a.name)}</b><span class="doing">${esc(a.doing)}</span></div>`).join('');
+    }
+    $('agents').innerHTML=html;
   } else {
-    // fallback: derive agent list from the status boards present
-    const boards=[['trader',d.t212],['risk',d.risk],['news radar',d.newsRadar],['news brain',d.newsBrain],['news bridge',d.newsBridge],['regime',d.regime],['scanner',d.scan],['crypto',d.crypto&&d.crypto.status],['commodities',d.commodities&&d.commodities.status],['historian',d.historian],['ranker',d.ranker],['earnings',d.earnings],['pine',d.pine],['auditor',d.audit],['perf',d.perf],['medic',d.medic],['sentinel',d.sentinel],['allocator',d.alloc],['logger',d.log]];
+    const boards=[['trader',d.t212],['risk',d.risk],['news radar',d.newsRadar],['news brain',d.newsBrain],['regime',d.regime],['scanner',d.scan],['crypto',d.crypto&&d.crypto.status],['commodities',d.commodities&&d.commodities.status],['historian',d.historian],['ranker',d.ranker],['earnings',d.earnings],['pine',d.pine],['auditor',d.audit],['perf',d.perf],['medic',d.medic],['sentinel',d.sentinel],['allocator',d.alloc],['logger',d.log]];
     $('agents').innerHTML=boards.map(([n,b])=>`<div class="ag ${b?'':'dead'}"><b>${n}</b><span class="s">${b?'● live':'● —'}</span></div>`).join('');
   }
 

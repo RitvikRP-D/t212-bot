@@ -10,7 +10,8 @@ const BASE = ['Recommend.All','Recommend.MA','Recommend.Other','RSI','Stoch.K','
 const TF_COLS = ['Recommend.All','RSI','Stoch.K','Stoch.D','CCI20','ADX','ADX+DI','ADX-DI','AO','Mom','MACD.macd','MACD.signal','W.R','UO','BBPower','EMA20','EMA50','EMA200','SMA20','SMA50','SMA200','P.SAR','BB.lower','BB.upper','Ichimoku.BLine','Stoch.RSI.K','ROC','Aroon.Up','Aroon.Down','MoneyFlow','HullMA9','VWMA','ATR','Volatility.D','CCI20[1]','RSI[1]','Stoch.K[1]','AO[1]','Mom[1]','MACD.signal[1]','ADX+DI[1]','ADX-DI[1]','Stoch.D[1]','Recommend.MA','Recommend.Other','change','UO[1]','BBPower[1]','W.R[1]','ROC[1]','Aroon.Up[1]'];
 const TFS = ['|15', '|60', '|240', '', '|1W', '|1M'];
 const COLS = [...new Set([...BASE, ...TFS.flatMap(tf => TF_COLS.map(c => c.includes('[') ? c : c + tf))])];
-const COINS = new Set(['BTC','ETH','SOL','BNB','XRP','ADA','DOGE','AVAX','DOT','LINK','LTC','UNI','ATOM','XLM','ETC','FIL','APT','ARB','OP','NEAR','INJ','SUI','TIA','SEI','FET','RNDR','TON','TRX','SHIB','PEPE']);
+const COINS = new Set(['BTC','ETH','SOL','BNB','XRP','ADA','DOGE','AVAX','DOT','LINK','LTC','UNI','ATOM','XLM','ETC','FIL','APT','ARB','OP','NEAR','INJ','SUI','TIA','SEI','FET','RNDR','TON','TRX','SHIB','PEPE',
+  'POL','ICP','HBAR','VET','ALGO','GRT','AAVE','MKR','RUNE','IMX','STX','WIF','BONK','FLOKI','JUP','PYTH','ONDO','ENA','LDO','CRV']);
 
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 function label(rec) { return rec >= 0.5 ? 'STRONG BUY' : rec >= 0.1 ? 'BUY' : rec <= -0.5 ? 'STRONG SELL' : rec <= -0.1 ? 'SELL' : 'NEUTRAL'; }
