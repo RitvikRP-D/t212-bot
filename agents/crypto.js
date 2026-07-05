@@ -45,12 +45,30 @@ function start(bus) {
   }
   mapETPs(); setInterval(mapETPs, 120000);
 
+  // Binance's main api.binance.com is geoblocked from many cloud IPs (Railway returns
+  // HTTP 451). data-api.binance.vision is the PUBLIC market-data mirror — same klines
+  // API, no auth, reachable from datacenters. We try hosts in order and cache the first
+  // that works so we don't keep hitting a blocked one.
+  const KLINE_HOSTS = ['https://data-api.binance.vision', 'https://api.binance.com', 'https://api1.binance.com', 'https://api.binance.us'];
+  let goodHost = null;
+  async function klines(coin) {
+    const hosts = goodHost ? [goodHost, ...KLINE_HOSTS.filter(h => h !== goodHost)] : KLINE_HOSTS;
+    for (const h of hosts) {
+      const ac = new AbortController(); const t = setTimeout(() => ac.abort(), 8000);
+      try {
+        const r = await fetch(`${h}/api/v3/klines?symbol=${coin}USDT&interval=1m&limit=120`, { signal: ac.signal });
+        if (!r.ok) continue;
+        const rows = await r.json();
+        if (Array.isArray(rows) && rows.length >= 30) { goodHost = h; return rows; }
+      } catch (e) { /* try next host */ } finally { clearTimeout(t); }
+    }
+    return null;
+  }
+
   async function scanCoin(coin) {
     try {
-      const r = await fetch(`https://api.binance.com/api/v3/klines?symbol=${coin}USDT&interval=1m&limit=120`);
-      if (!r.ok) { bus.cryptoStatus.errors++; return; }
-      const rows = await r.json();
-      if (!Array.isArray(rows) || rows.length < 30) return;
+      const rows = await klines(coin);
+      if (!rows) { bus.cryptoStatus.errors++; return; }
       const opens = rows.map(k => +k[1]), highs = rows.map(k => +k[2]), lows = rows.map(k => +k[3]),
             closes = rows.map(k => +k[4]), vols = rows.map(k => +k[5]);
       const c = bus.crypto[coin] = bus.crypto[coin] || {};
