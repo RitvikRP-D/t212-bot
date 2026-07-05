@@ -46,6 +46,7 @@ let lastHealthy = Date.now();  // track last successful trade/order
 const bus = {
   market: {}, state, news: {},
   universe: fallback(),
+  quiverKey: state.quiverKey || null,   // runtime Quiver key (dashboard-set), persisted in state
   markDirty: () => { dirty = true; },
   onTick: null, onTrade: null,
   beats: {}, beat: (n) => { bus.beats[n] = Date.now(); },   // fleet heartbeat pings (medic also owns this)
@@ -350,6 +351,19 @@ const server = http.createServer((req, res) => {
     if (bus.notify) bus.notify(`🔄 Manual re-analysis triggered from dashboard — ${names.length} names front-loaded.`);
     res.writeHead(200, { 'Content-Type': 'application/json', ...cors });
     return res.end(JSON.stringify({ rescanned: names.length }));
+  }
+  // QUIVER KEY — paste a Quiver API key from the dashboard; activates the connector live
+  // (persisted in state, no redeploy). Send action=clear to remove it.
+  if (req.url.startsWith('/api/quiver-key') && req.method === 'POST') {
+    const q = req.url.split('?')[1] || '';
+    const clear = /action=clear/.test(q);
+    const key = decodeURIComponent((q.match(/key=([^&]+)/) || [])[1] || '').trim();
+    if (clear) { state.quiverKey = null; bus.quiverKey = null; bus.markDirty(); res.writeHead(200, { 'Content-Type': 'application/json', ...cors }); return res.end(JSON.stringify({ cleared: true })); }
+    if (!key || key.length < 8) { res.writeHead(400, { 'Content-Type': 'application/json', ...cors }); return res.end(JSON.stringify({ error: 'key too short' })); }
+    state.quiverKey = key; bus.quiverKey = key; bus.markDirty();
+    if (bus.notify) bus.notify('🦌 Quiver API key saved — connector will validate on its next cycle (~1 min).');
+    res.writeHead(200, { 'Content-Type': 'application/json', ...cors });
+    return res.end(JSON.stringify({ saved: true, hint: 'validating on next quiver cycle (~1 min); watch the Quiver panel' }));
   }
   // REBASELINE — when you manually fund/withdraw the account, hit this to resync the risk floor
   if (req.url === '/api/rebaseline' && req.method === 'POST') {

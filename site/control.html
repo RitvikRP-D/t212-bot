@@ -251,6 +251,13 @@
         <input class="inp" id="realurl" placeholder="https://…railway.app" style="width:240px;">
         <button class="xbtn" style="background:#12324a;border-color:#1c4a6e;color:#cfe7ff;" onclick="localStorage.setItem('botApiUrlReal',$('realurl').value);toast('✓ real backend saved')">SAVE</button>
       </div>
+      <div class="muted" style="font-size:10px;margin:14px 0 6px;">🦌 QUIVER QUANTITATIVE API KEY — paste to add congress trades + gov contracts (free signup at api.quiverquant.com/pricing; API access may need a paid plan)</div>
+      <div style="display:flex;gap:8px;">
+        <input class="inp" id="quiverkey" placeholder="Quiver API key" style="width:240px;">
+        <button class="xbtn" style="background:#1b3320;border-color:#2a5a35;color:#bfe9cf;" onclick="saveQuiver()">ACTIVATE</button>
+        <button class="xbtn" onclick="clearQuiver()">CLEAR</button>
+      </div>
+      <div id="quiver-status" class="muted" style="font-size:10px;margin-top:6px;"></div>
       <div class="muted" style="font-size:10px;margin-top:14px;">💰 Adding/removing funds? Deposit or withdraw in the T212 app, then press <b>💰 REBASELINE</b> on that account's page — the bot rescales its risk floor instantly, nothing freezes, positions stay managed.</div>
     </div>
   </section>
@@ -311,6 +318,8 @@ async function rebase(){
 async function closeOne(sym){ if(confirm('Sell '+sym+' at market right now?')){ try{ await fetch(API_BASE+'/api/close?sym='+encodeURIComponent(sym),{method:'POST',mode:'cors'}); toast('✂️ closing '+sym); }catch(e){ toast('⚠️ could not reach bot'); } } }
 async function blacklist(sym,action){ sym=(sym||'').trim().toUpperCase(); if(!sym)return; try{ await fetch(API_BASE+'/api/blacklist?sym='+encodeURIComponent(sym)+'&action='+action,{method:'POST',mode:'cors'}); toast((action==='add'?'🚫 blocked ':'✓ unblocked ')+sym); $('blsym').value=''; }catch(e){ toast('⚠️ could not reach bot'); } }
 async function rescan(){ try{ const r=await fetch(API_BASE+'/api/rescan',{method:'POST',mode:'cors'}); const d=await r.json(); toast('🔄 re-analysing '+(d.rescanned||0)+' names'); }catch(e){ toast('⚠️ could not reach bot'); } }
+async function saveQuiver(){ const k=($('quiverkey').value||'').trim(); if(k.length<8){toast('key looks too short');return;} try{ const r=await fetch(API_BASE+'/api/quiver-key?key='+encodeURIComponent(k),{method:'POST',mode:'cors'}); const d=await r.json(); if(d.saved){toast('🦌 Quiver key saved — validating…');$('quiverkey').value='';}else{toast('⚠️ '+(d.error||'rejected'));} }catch(e){ toast('⚠️ could not reach bot'); } }
+async function clearQuiver(){ try{ await fetch(API_BASE+'/api/quiver-key?action=clear',{method:'POST',mode:'cors'}); toast('Quiver key cleared'); }catch(e){ toast('⚠️ could not reach bot'); } }
 function scoreColor(s){ return s>0.3?'green':s<-0.3?'red':'muted'; }
 function biasBar(v){ const w=Math.min(100,Math.abs(v)*100); const c=v>=0?'var(--green)':'var(--red)'; return `<div class="bar"><i style="width:${w}%;background:${c};margin-left:${v<0?(100-w):50}%"></i></div>`; }
 function confBar(v){ v=Number(v||0); const w=Math.round(Math.min(1,Math.max(0,v))*100); const c=v>=0.63?'var(--green)':v>=0.4?'var(--amber)':'#3a4658'; return `<span style="display:inline-block;width:44px;height:8px;border-radius:4px;background:#1a2434;vertical-align:middle;position:relative;"><span style="position:absolute;left:0;top:0;height:8px;width:${w}%;background:${c};border-radius:4px;"></span></span> <span style="font-size:9px;" class="muted">${w}%</span>`; }
@@ -505,6 +514,7 @@ function render(d){
       ?`<div style="margin-bottom:6px;">${(Q.congress||[]).slice(0,12).map(c=>`<span class="chip ${c.buys>c.sells?'green':'red'}">${esc(c.sym)} ${c.buys}B/${c.sells}S</span>`).join('')}</div>
         <div class="muted" style="font-size:10px;">Gov contracts: ${(Q.contracts||[]).slice(0,10).map(c=>esc(c.sym)).join(', ')||'—'}</div>`
       :`<span class="muted">${esc(Q.note||'Quiver API is paid — set QUIVER_API_KEY to activate congress trades + gov contracts + political data.')}</span>`;
+    if($('quiver-status'))$('quiver-status').innerHTML=Q.enabled?`<span class="green">🦌 ACTIVE (${esc(Q.source||'')}) · ${(Q.congress||[]).length} congress · ${(Q.contracts||[]).length} contracts · ${esc(Q.updated||'')}</span>`:(Q.keyRejected?`<span class="red">key rejected (401/403) — API access likely needs a paid plan</span>`:`<span class="muted">${esc(Q.note||'no key set')}</span>`);
   }
 
   // FLEET — grouped live board
