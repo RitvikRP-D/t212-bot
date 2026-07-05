@@ -31,7 +31,7 @@ function atomicWriteState() {
 let state = {
   paper: { balance: PAPER_START, positions: {} },
   t212: { positions: {} },
-  realized: 0, history: [], learn: {}, equityCurve: [], pause: false,
+  realized: 0, history: [], learn: {}, equityCurve: [], pause: false, blacklist: {},
   startedAt: new Date().toISOString(),
 };
 try {
@@ -165,6 +165,8 @@ require('./agents/newsbrain').start(bus);   // 🅑 news interpreter — maps st
 require('./agents/newsbridge').start(bus);  // 🅒 news→fleet bridge — feeds interpreted news into trader votes + boards
 require('./agents/newscorrelate').start(bus); // 🅓 correlator — every headline → affected stocks + direction + why, cross-checked vs TradingView
 require('./agents/openbell').start(bus);    // 🔔 opening-bell trigger — fresh news+chart re-analysis the instant a venue opens
+require('./lib/fundamentals').start(bus);   // 📊 P/E, growth, D/E, dividends, margins for ~6k names (feeds the desks)
+require('./agents/desks').start(bus);       // 🏦 10 institutional desks: Goldman/MS/Bridgewater/JPM/BlackRock/Citadel/Harvard/Bain/RenTech/McKinsey
 require('./agents/stocks').start(bus);      // ① 1-min scanner, 16k universe
 require('./agents/crypto').start(bus);      // ⑩ crypto 24/7 (Binance + crypto news + ETP mapping)
 require('./agents/commodities').start(bus); // ⑫ gold/silver/oil/copper… 24 targets via ~23h futures
@@ -232,6 +234,10 @@ function snapshot() {
     newsCorrelations: bus.newsCorrelations ? bus.newsCorrelations.slice(0, 60) : null,
     newsCorrStatus: bus.newsCorrStatus || null,
     openBell: bus.openBell ? { lastOpened: bus.openBell.lastOpened, history: bus.openBell.history } : null,
+    trumpAssets: (bus.newsRadar && bus.newsRadar.trumpAssets) || null,
+    desks: bus.desks || null,
+    fundStatus: bus.fundStatus || null,
+    blacklist: Object.keys(state.blacklist || {}),
     queue: Object.entries(state.queue || {}).map(([sym, q]) => ({ sym, ...q })),
     newsAgent: { updated: bus.news.updated, headlines: (bus.news.headlines || []).length, congress: (bus.news.congress || []).length },
     paperCash: +state.paper.balance.toFixed(2),
@@ -302,6 +308,39 @@ const server = http.createServer((req, res) => {
     if (bus.notify) bus.notify('🛑 KILL switch pressed on dashboard — liquidating + paused.');
     res.writeHead(200, { 'Content-Type': 'application/json', ...cors });
     return res.end(JSON.stringify({ killed: true, paused: true }));
+  }
+  // CLOSE ONE POSITION — sell a single holding at market from the dashboard
+  if (req.url.startsWith('/api/close') && req.method === 'POST') {
+    const sym = decodeURIComponent((req.url.split('sym=')[1] || '').split('&')[0]);
+    const p = state.t212.positions[sym] || state.paper.positions[sym];
+    if (!sym || !p) { res.writeHead(404, { 'Content-Type': 'application/json', ...cors }); return res.end(JSON.stringify({ error: 'position not found: ' + sym })); }
+    p.forceClose = true; bus.markDirty();
+    if (bus.notify) bus.notify(`✂️ Manual close requested from dashboard: ${sym} — selling at market on next tick.`);
+    res.writeHead(200, { 'Content-Type': 'application/json', ...cors });
+    return res.end(JSON.stringify({ closing: sym }));
+  }
+  // BLACKLIST — block/unblock a symbol from ever being bought (from the dashboard)
+  if (req.url.startsWith('/api/blacklist') && req.method === 'POST') {
+    const q = req.url.split('?')[1] || '';
+    const sym = decodeURIComponent((q.match(/sym=([^&]+)/) || [])[1] || '').toUpperCase();
+    const remove = /action=remove/.test(q);
+    if (!sym) { res.writeHead(400, { 'Content-Type': 'application/json', ...cors }); return res.end(JSON.stringify({ error: 'sym required' })); }
+    state.blacklist = state.blacklist || {};
+    if (remove) delete state.blacklist[sym]; else state.blacklist[sym] = true;
+    bus.markDirty();
+    res.writeHead(200, { 'Content-Type': 'application/json', ...cors });
+    return res.end(JSON.stringify({ blacklist: Object.keys(state.blacklist) }));
+  }
+  // RESCAN — manual "opening bell": re-analyse all held/tracked names right now
+  if (req.url === '/api/rescan' && req.method === 'POST') {
+    const names = [...new Set([...Object.keys(state.t212.positions || {}), ...Object.keys(bus.market || {})])];
+    bus.tvHot = bus.tvHot || [];
+    for (const s of names) if (!bus.tvHot.includes(s)) bus.tvHot.unshift(s);
+    bus.tvHot = bus.tvHot.slice(0, 300);
+    bus.freshOpen = { venue: 'MANUAL', label: 'dashboard rescan', at: Date.now(), names: names.length };
+    if (bus.notify) bus.notify(`🔄 Manual re-analysis triggered from dashboard — ${names.length} names front-loaded.`);
+    res.writeHead(200, { 'Content-Type': 'application/json', ...cors });
+    return res.end(JSON.stringify({ rescanned: names.length }));
   }
   // REBASELINE — when you manually fund/withdraw the account, hit this to resync the risk floor
   if (req.url === '/api/rebaseline' && req.method === 'POST') {

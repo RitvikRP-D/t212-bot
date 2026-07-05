@@ -176,6 +176,7 @@ function start(bus) {
   }
 
   async function tryEnter(sym, mk) {
+    if (state.blacklist && state.blacklist[sym]) { mk.lastConf = 0; mk.lastWhy = 'blacklisted from dashboard'; return; }
     const senti = sentiFor(sym);
     const ev = evaluate(mk, senti, bus.news.fng ? bus.news.fng.value : null, 1);
     if (!ev) { mk.lastConf = 0; mk.lastWhy = mk.rsi != null ? `no buy setup — RSI ${mk.rsi.toFixed(1)}${mk.rsi > 68 ? ' overbought' : ''}` : 'warming up'; return; }
@@ -244,6 +245,21 @@ function start(bus) {
       conf = Math.max(0, Math.min(1, conf + Math.max(-0.07, Math.min(0.07, ni * 0.07))));
       if (ni > 0.3) { votes.push('news-correlate'); tvNote += ` · news→stock +${ni.toFixed(2)}`; }
       else if (ni < -0.35) tvNote += ` · news→stock ${ni.toFixed(2)} (headwind)`;
+    }
+    // INSTITUTIONAL DESKS (agents 🏦): Goldman-screener quality + McKinsey macro sector
+    // tilt, bounded advisory fold-in — more information, never a constraint.
+    if (bus.desks) {
+      const sq = bus.desks.screener && bus.desks.screener.scores && bus.desks.screener.scores[sym];
+      if (sq != null) {
+        conf = Math.max(0, Math.min(1, conf + (sq - 0.5) * 0.10));
+        if (sq > 0.75) { votes.push('desk-screener'); tvNote += ` · screener quality ${(sq * 100).toFixed(0)}%`; }
+      }
+      const mt = bus.desks.macro && bus.desks.macro.sectorTilt && bus.desks.macro.sectorTilt[require('../lib/fleet').sectorOf(sym)];
+      if (mt != null && Math.abs(mt) > 0.2) {
+        conf = Math.max(0, Math.min(1, conf + mt * 0.05));
+        if (mt > 0.35) votes.push('desk-macro');
+        tvNote += ` · macro ${mt > 0 ? 'tailwind' : 'headwind'} ${mt}`;
+      }
     }
     mk.lastVotes = votes;
 
@@ -421,6 +437,7 @@ function start(bus) {
     for (const [book, ledger] of [[state.t212.positions, 'T212-PRACTICE'], [state.paper.positions, 'VIRTUAL']]) {
       const p = book[sym];
       if (!p || p.pendingFill) continue;
+      if (p.forceClose) { closePos(sym, ledger, book, p, mk, 'manual close from dashboard'); continue; }
       if (mk.price > p.peak) p.peak = mk.price;
       const gain = (mk.price - p.entry) / p.entry;
       const peakGain = (p.peak - p.entry) / p.entry;

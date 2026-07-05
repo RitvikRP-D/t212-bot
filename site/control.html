@@ -22,6 +22,11 @@
   .modewrap{margin-left:auto;display:flex;gap:6px;align-items:center;}
   .mode{font-size:10px;font-weight:700;padding:4px 9px;border-radius:20px;text-transform:uppercase;letter-spacing:.6px;}
   .mode.demo{background:#0e2f4a;color:var(--blue);} .mode.live{background:#3a1015;color:var(--red);border:1px solid #5a1a22;}
+  .acct{font-size:10px;font-weight:700;padding:4px 10px;border-radius:20px;cursor:pointer;background:var(--panel);border:1px solid var(--line);color:var(--muted);}
+  .acct.on{background:#12324a;color:var(--text);border-color:#1c4a6e;}
+  .acct[data-a="real"].on{background:#3a1015;color:#ffd7dc;border-color:#6e1a25;}
+  .xbtn{font-size:9px;font-weight:700;padding:3px 8px;border-radius:7px;border:1px solid #6e1a25;background:#2a0d12;color:#ffb4bd;cursor:pointer;}
+  .inp{background:var(--panel2);border:1px solid var(--line);border-radius:8px;color:var(--text);padding:8px 10px;font-family:inherit;font-size:12px;width:130px;}
   /* control bar */
   .controls{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px;}
   .btn{border:none;border-radius:11px;padding:13px 8px;font-family:inherit;font-size:12.5px;font-weight:700;cursor:pointer;color:#fff;display:flex;flex-direction:column;align-items:center;gap:3px;transition:transform .08s;}
@@ -72,7 +77,11 @@
   <div class="top">
     <div class="brand">RITVIK<span class="x">·</span>CONTROL</div>
     <div class="live"><span class="pulse" id="pulse"></span><span id="livetxt">connecting…</span></div>
-    <div class="modewrap"><span class="mode demo" id="mode">demo</span></div>
+    <div class="modewrap">
+      <span class="acct on" data-a="virtual" onclick="switchAcct('virtual')">VIRTUAL</span>
+      <span class="acct" data-a="real" onclick="switchAcct('real')">REAL £</span>
+      <span class="mode demo" id="mode">demo</span>
+    </div>
   </div>
 
   <div class="controls">
@@ -101,8 +110,10 @@
     <div class="tab" data-t="corr" onclick="tab('corr')">🎯 News→Stocks</div>
     <div class="tab" data-t="brain" onclick="tab('brain')">🧠 News Brain</div>
     <div class="tab" data-t="positions" onclick="tab('positions')">Positions</div>
+    <div class="tab" data-t="desks" onclick="tab('desks')">🏦 Desks</div>
     <div class="tab" data-t="agents" onclick="tab('agents')">All Agents</div>
     <div class="tab" data-t="log" onclick="tab('log')">Trade Log</div>
+    <div class="tab" data-t="ctl" onclick="tab('ctl')">⚙ Controls</div>
   </div>
 
   <!-- OVERVIEW -->
@@ -147,7 +158,55 @@
   <!-- POSITIONS -->
   <section id="s-positions">
     <h2>Open Positions</h2>
-    <div class="panel"><div class="feed"><table><thead><tr><th>Sym</th><th>Inv</th><th>Entry</th><th>Now</th><th>P&L</th><th>Why</th></tr></thead><tbody id="pos"></tbody></table></div></div>
+    <div class="panel"><div class="feed"><table><thead><tr><th>Sym</th><th>Inv</th><th>Entry</th><th>Now</th><th>P&L</th><th>Why</th><th></th></tr></thead><tbody id="pos"></tbody></table></div></div>
+  </section>
+
+  <!-- DESKS -->
+  <section id="s-desks">
+    <h2>🏛 Trump Portfolio Watch <span class="u">what he & family actually own + every headline about it</span></h2>
+    <div class="panel" id="trumpassets">gathering…</div>
+    <h2>① Goldman Screener <span class="u" id="d-scr-u"></span></h2>
+    <div class="panel"><div class="feed"><table><thead><tr><th>Sym</th><th>P/E vs sector</th><th>Rev/EPS gr</th><th>D/E</th><th>Moat</th><th>Risk</th><th>Bull/Bear 12m</th><th>Entry/Stop</th></tr></thead><tbody id="d-scr"></tbody></table></div></div>
+    <h2>② Morgan Stanley DCF</h2>
+    <div class="panel"><div class="feed"><table><thead><tr><th>Sym</th><th>Price</th><th>Fair value</th><th>Gap</th><th>Verdict</th><th>Breaks if</th></tr></thead><tbody id="d-val"></tbody></table></div></div>
+    <h2>③ Bridgewater Risk</h2>
+    <div class="panel" id="d-risk">no open positions yet</div>
+    <h2>④ JPMorgan Earnings Desk</h2>
+    <div class="panel"><div class="feed"><table><thead><tr><th>Sym</th><th>Date</th><th>Implied move</th><th>Chart</th><th>Play</th></tr></thead><tbody id="d-earn"></tbody></table></div></div>
+    <h2>⑤ BlackRock Portfolio Plan</h2>
+    <div class="panel" id="d-port">…</div>
+    <h2>⑥ Citadel Tech Desk</h2>
+    <div class="panel"><div class="feed"><table><thead><tr><th>Sym</th><th>Verdict</th><th>Trend D/M</th><th>Support/Resist</th><th>Entry·Stop·Target</th><th>Notes</th></tr></thead><tbody id="d-tech"></tbody></table></div></div>
+    <h2>⑦ Harvard Dividend Sleeve <span class="u" id="d-div-u"></span></h2>
+    <div class="panel"><div class="feed"><table><thead><tr><th>Sym</th><th>Yield</th><th>Safety /10</th><th>Payout</th><th>Sector</th><th>Chart</th></tr></thead><tbody id="d-div"></tbody></table></div></div>
+    <h2>⑧ Bain Moat Desk</h2>
+    <div class="panel" id="d-moat">…</div>
+    <h2>⑨ RenTech Pattern Memos</h2>
+    <div class="panel" id="d-pat">…</div>
+    <h2>⑩ McKinsey Macro Briefing</h2>
+    <div class="panel" id="d-mac">…</div>
+  </section>
+
+  <!-- CONTROLS -->
+  <section id="s-ctl">
+    <h2>Extra Controls</h2>
+    <div class="panel">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
+        <button class="btn rebase" style="flex:1;" onclick="rescan()">🔄 RE-ANALYSE NOW<small>fresh news+chart pass on everything</small></button>
+      </div>
+      <div class="muted" style="font-size:10px;margin:10px 0 6px;">🚫 BLACKLIST — the bot will never buy these (works instantly on either account)</div>
+      <div style="display:flex;gap:8px;margin-bottom:8px;">
+        <input class="inp" id="blsym" placeholder="e.g. TSLA" style="text-transform:uppercase;">
+        <button class="xbtn" onclick="blacklist($('blsym').value,'add')">BLOCK</button>
+      </div>
+      <div id="bl-list" class="muted">none blocked</div>
+      <div class="muted" style="font-size:10px;margin:14px 0 6px;">🔌 REAL-ACCOUNT BACKEND URL (set once when the real bot is deployed)</div>
+      <div style="display:flex;gap:8px;">
+        <input class="inp" id="realurl" placeholder="https://…railway.app" style="width:240px;">
+        <button class="xbtn" style="background:#12324a;border-color:#1c4a6e;color:#cfe7ff;" onclick="localStorage.setItem('botApiUrlReal',$('realurl').value);toast('✓ real backend saved')">SAVE</button>
+      </div>
+      <div class="muted" style="font-size:10px;margin-top:14px;">💰 Adding/removing funds? Deposit or withdraw in the T212 app, then press <b>💰 REBASELINE</b> on that account's page — the bot rescales its risk floor instantly, nothing freezes, positions stay managed.</div>
+    </div>
   </section>
 
   <!-- AGENTS -->
@@ -165,10 +224,20 @@
   <div class="toast" id="toast"></div>
 
 <script>
-// API endpoint — auto-detects localhost or deployed backend
-const API_BASE = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
-  ? 'http://localhost:3100'
-  : (localStorage.getItem('botApiUrl') || 'https://t212-bot-production.up.railway.app');
+// TWO ACCOUNTS, ONE SITE — Virtual bot + Real-£ bot are separate backends.
+// The pill in the header switches which one this page controls.
+const LOCAL = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+const ACCOUNTS = {
+  virtual: LOCAL ? 'http://localhost:3100' : (localStorage.getItem('botApiUrl') || 'https://t212-bot-production.up.railway.app'),
+  real:    localStorage.getItem('botApiUrlReal') || 'https://t212-bot-real-production.up.railway.app',
+};
+let ACCT = localStorage.getItem('acct') || 'virtual';
+let API_BASE = ACCOUNTS[ACCT];
+function switchAcct(a){
+  ACCT = a; API_BASE = ACCOUNTS[a]; localStorage.setItem('acct', a);
+  document.querySelectorAll('.acct').forEach(el=>el.classList.toggle('on', el.dataset.a===a));
+  connect(true);
+}
 const $=id=>document.getElementById(id);
 function money(n){n=Number(n||0);return (n<0?'-':'')+'£'+Math.abs(n).toLocaleString('en-GB',{minimumFractionDigits:2,maximumFractionDigits:2});}
 function pct(n){n=Number(n||0);return (n>=0?'+':'')+n.toFixed(2)+'%';}
@@ -193,6 +262,9 @@ async function rebase(){
   catch(e){ toast('⚠️ could not reach bot'); }
 }
 
+async function closeOne(sym){ if(confirm('Sell '+sym+' at market right now?')){ try{ await fetch(API_BASE+'/api/close?sym='+encodeURIComponent(sym),{method:'POST',mode:'cors'}); toast('✂️ closing '+sym); }catch(e){ toast('⚠️ could not reach bot'); } } }
+async function blacklist(sym,action){ sym=(sym||'').trim().toUpperCase(); if(!sym)return; try{ await fetch(API_BASE+'/api/blacklist?sym='+encodeURIComponent(sym)+'&action='+action,{method:'POST',mode:'cors'}); toast((action==='add'?'🚫 blocked ':'✓ unblocked ')+sym); $('blsym').value=''; }catch(e){ toast('⚠️ could not reach bot'); } }
+async function rescan(){ try{ const r=await fetch(API_BASE+'/api/rescan',{method:'POST',mode:'cors'}); const d=await r.json(); toast('🔄 re-analysing '+(d.rescanned||0)+' names'); }catch(e){ toast('⚠️ could not reach bot'); } }
 function scoreColor(s){ return s>0.3?'green':s<-0.3?'red':'muted'; }
 function biasBar(v){ const w=Math.min(100,Math.abs(v)*100); const c=v>=0?'var(--green)':'var(--red)'; return `<div class="bar"><i style="width:${w}%;background:${c};margin-left:${v<0?(100-w):50}%"></i></div>`; }
 
@@ -278,10 +350,51 @@ function render(d){
     $('conflicts').innerHTML=(d.newsBridge.conflicts||[]).length?(d.newsBridge.conflicts||[]).map(a=>`<span class="chip red">${esc(a.sym)} ${a.s}</span>`).join(''):'<span class="muted">—</span>';
   }
 
-  // positions
+  // positions (with per-row manual close)
   $('pos').innerHTML=(d.positions||[]).length?(d.positions||[]).map(p=>`<tr>
      <td style="font-weight:700;">${esc(p.sym)}</td><td>${money(p.invested)}</td><td>${px(p.entry)}</td><td>${px(p.cur)}</td>
-     <td class="${cls(p.upnl)}">${money(p.upnl)}</td><td class="muted" style="font-size:10px;max-width:140px;overflow:hidden;text-overflow:ellipsis;">${esc(p.reason)}</td></tr>`).join(''):'<tr><td class="muted" colspan="6">No open positions.</td></tr>';
+     <td class="${cls(p.upnl)}">${money(p.upnl)}</td><td class="muted" style="font-size:10px;max-width:120px;overflow:hidden;text-overflow:ellipsis;">${esc(p.reason)}</td>
+     <td><button class="xbtn" onclick="closeOne('${esc(p.sym)}')">SELL</button></td></tr>`).join(''):'<tr><td class="muted" colspan="7">No open positions.</td></tr>';
+
+  // DESKS
+  if(d.trumpAssets){
+    const ta=d.trumpAssets;
+    $('trumpassets').innerHTML=
+      '<div style="margin-bottom:8px;">'+(ta.assets||[]).map(a=>`<span class="chip amber"><b>${esc(a.sym)}</b> ${esc(a.name)} — ${esc(a.why)}</span>`).join(' ')+'</div>'
+      +'<div class="feed">'+((ta.headlines||[]).map(h=>`<div class="hl"><span class="src trump">${esc(h.source)}</span><span>${esc(h.title)}</span><span class="score ${scoreColor(h.score)}">${(h.score>0?'+':'')+h.score}</span></div>`).join('')||'<span class="muted">no fresh holdings headlines this sweep</span>')+'</div>';
+  }
+  if(d.desks){
+    const D=d.desks;
+    if(D.screener){ $('d-scr-u').textContent=(D.screener.pool||0)+' names screened · '+(D.screener.updated||'');
+      $('d-scr').innerHTML=(D.screener.top||[]).map(t=>`<tr><td style="font-weight:700;">${esc(t.sym)}</td><td>${t.pe??'—'} / ${t.secPE??'—'}</td><td class="muted">${t.revG??'—'}% / ${t.epsG??'—'}%</td><td>${t.de??'—'}</td><td class="${t.moat==='STRONG'?'green':t.moat==='WEAK'?'red':'amber'}">${t.moat}</td><td>${t.risk}/10</td><td><span class="green">${t.bull}</span> / <span class="red">${t.bear}</span></td><td class="muted">${t.entry} · ${t.stop}</td></tr>`).join('')||'<tr><td class="muted" colspan="8">screening…</td></tr>'; }
+    if(D.valuation){ $('d-val').innerHTML=(D.valuation.verdicts||[]).map(v=>`<tr><td style="font-weight:700;">${esc(v.sym)}</td><td>${v.px}</td><td>${v.fair}</td><td class="${cls(v.gap)}">${v.gap>0?'+':''}${v.gap}%</td><td class="${v.verdict==='UNDERVALUED'?'green':v.verdict==='OVERVALUED'?'red':'muted'}">${v.verdict}</td><td class="muted" style="font-size:10px;">${esc(v.breakIf)}</td></tr>`).join('')||'<tr><td class="muted" colspan="6">building models…</td></tr>'; }
+    if(D.risk){ const R=D.risk; $('d-risk').innerHTML=R.empty?esc(R.note):
+      `<div class="chip">β ${R.beta}</div> ${Object.entries(R.sectors||{}).map(([s,p])=>`<span class="chip">${s} ${p}%</span>`).join('')}<br>
+       <div class="muted" style="margin:6px 0;font-size:10px;">${esc(R.stress||'')}</div>
+       ${(R.topCorr||[]).map(c=>`<span class="chip ${Math.abs(c.corr)>0.8?'red':''}">${c.pair} ${c.corr}</span>`).join('')}
+       <div style="margin-top:6px;">${(R.advice||[]).map(a=>`<div style="font-size:11px;">${esc(a)}</div>`).join('')}</div>`; }
+    if(D.earnings){ $('d-earn').innerHTML=(D.earnings.briefs||[]).map(b=>`<tr><td style="font-weight:700;">${esc(b.sym)}</td><td>${esc(b.date)}</td><td>${esc(b.implied)}</td><td>${esc(b.chart)}</td><td class="muted" style="font-size:10px;">${esc(b.play)}</td></tr>`).join('')||'<tr><td class="muted" colspan="5">no earnings in the next 6 days on tracked names</td></tr>'; }
+    if(D.portfolio){ const P=D.portfolio; $('d-port').innerHTML=
+      `${(P.alloc||[]).map(a=>`<span class="chip">${a.bucket}: <b>${a.pct}%</b></span>`).join(' ')}
+       <div style="margin-top:8px;font-size:11px;">Core: ${(P.core||[]).map(esc).join(', ')||'—'} · Satellites: ${(P.satellites||[]).map(esc).join(', ')||'—'}</div>
+       <div class="muted" style="font-size:10px;margin-top:6px;">Expected ${esc(P.expReturn)} · worst-year ${esc(P.expDrawdown)} · rebalance: ${esc(P.rebalance)} · DCA ${esc(P.dca)} · benchmark ${esc(P.benchmark)}</div>
+       <div class="muted" style="font-size:10px;margin-top:4px;">${esc(P.policy)}</div>`; }
+    if(D.tech){ $('d-tech').innerHTML=Object.values(D.tech.cards||{}).map(c=>`<tr><td style="font-weight:700;">${esc(c.sym)}</td><td class="${/BUY/.test(c.verdict)?'green':/SELL/.test(c.verdict)?'red':'muted'}">${esc(c.verdict)}</td><td>${c.trend?.daily}/${c.trend?.monthly}</td><td class="muted">${c.support} / ${c.resistance}</td><td class="muted" style="font-size:10px;">${c.entry} · ${c.stop} · ${c.target}</td><td class="muted" style="font-size:10px;max-width:130px;overflow:hidden;text-overflow:ellipsis;">${esc(c.notes)}</td></tr>`).join('')||'<tr><td class="muted" colspan="6">rating…</td></tr>'; }
+    if(D.dividend){ $('d-div-u').textContent='~£'+(D.dividend.monthlyIncome??'—')+'/mo at current equity · avg '+(D.dividend.avgYield??'—')+'% · 10y DRIP → £'+(D.dividend.drip10y??'—');
+      $('d-div').innerHTML=(D.dividend.picks||[]).map(p=>`<tr><td style="font-weight:700;">${esc(p.sym)}</td><td>${p.yield}%</td><td class="${p.safety>=7?'green':p.safety<=4?'red':'amber'}">${p.safety}</td><td>${p.payout??'—'}% ${esc(p.flag||'')}</td><td class="muted">${esc(p.sector||'')}</td><td>${esc(p.chart||'')}</td></tr>`).join('')||'<tr><td class="muted" colspan="6">screening dividends…</td></tr>'; }
+    if(D.moat){ $('d-moat').innerHTML=(D.moat.reports||[]).map(r=>
+      `<div style="margin-bottom:10px;"><b style="font-size:12px;">${esc(r.sector)}</b> — pick: <b class="green">${esc(r.pick||'—')}</b> <span class="muted" style="font-size:10px;">(${esc(r.why)})</span>
+       <div class="muted" style="font-size:10px;">catalyst: ${esc(r.catalyst||'')}</div>
+       <div style="margin-top:4px;">${(r.table||[]).map(t=>`<span class="chip">${t.sym} ${t.mcap} · om ${t.om??'—'}% · ${t.moat}</span>`).join('')}</div></div>`).join('')||'gathering…'; }
+    if(D.patterns){ $('d-pat').innerHTML=(D.patterns.memos||[]).map(m=>`<div style="margin-bottom:8px;"><b>${esc(m.sym)}</b> <span class="${m.edge.startsWith('QUANT')?'green':'muted'}" style="font-size:10px;">${esc(m.edge)}</span><div class="muted" style="font-size:10px;">${(m.edges||[]).map(esc).join(' · ')}</div></div>`).join('')||'mining…'; }
+    if(D.macro){ $('d-mac').innerHTML=
+      (D.macro.briefing||[]).map(b=>`<div style="font-size:11px;margin-bottom:3px;">• ${esc(b)}</div>`).join('')
+      +'<div style="margin:6px 0;">'+Object.entries(D.macro.sectorTilt||{}).map(([s,v])=>`<span class="chip ${scoreColor(v)}">${s} ${v>0?'+':''}${v}</span>`).join('')+'</div>'
+      +((D.macro.adjustments||[]).map(a=>`<div style="font-size:10px;" class="muted">${esc(a.sym)} (${esc(a.sector)}): ${esc(a.call)}</div>`).join(''))
+      +`<div class="muted" style="font-size:9px;margin-top:4px;">${esc(D.macro.timeline||'')}</div>`; }
+  }
+  // blacklist chips
+  if(d.blacklist){ $('bl-list').innerHTML=(d.blacklist||[]).length?d.blacklist.map(s=>`<span class="chip red">${esc(s)} <b style="cursor:pointer;" onclick="blacklist('${esc(s)}','remove')">✕</b></span>`).join(''):'none blocked'; }
 
   // agents
   if(d.fleet&&d.fleet.agents){
@@ -303,18 +416,24 @@ function render(d){
      <td class="${cls(h.pnl||0)}">${h.pnl!=null?money(h.pnl):'—'}</td><td class="muted" style="font-size:10px;max-width:150px;overflow:hidden;text-overflow:ellipsis;">${esc(h.why)}</td></tr>`).join('');
 }
 
-// live stream via SSE, fall back to polling
-function connect(){
+// live stream via SSE, fall back to polling; account switch = clean reconnect
+let ES=null, GEN=0;
+function connect(reset){
+  if(reset){ if(ES){try{ES.close();}catch(e){}} GEN++; $('livetxt').textContent='connecting…'; }
+  const g=GEN;
   try{
-    const es=new EventSource(API_BASE+'/events');
-    es.onmessage=e=>{try{render(JSON.parse(e.data));}catch(x){}};
-    es.onerror=()=>{es.close();setTimeout(poll,1500);};
-  }catch(e){poll();}
+    ES=new EventSource(API_BASE+'/events');
+    ES.onmessage=e=>{ if(g!==GEN)return; try{render(JSON.parse(e.data));}catch(x){} };
+    ES.onerror=()=>{ if(g!==GEN)return; try{ES.close();}catch(e){} setTimeout(()=>poll(g),1500); };
+  }catch(e){poll(g);}
 }
-async function poll(){
-  try{ const r=await fetch(API_BASE+'/api/state',{mode:'cors'}); render(await r.json()); }catch(e){ $('pulse').classList.add('dead'); $('livetxt').textContent='offline'; }
-  setTimeout(poll,2000);
+async function poll(g){
+  if(g!==GEN)return;
+  try{ const r=await fetch(API_BASE+'/api/state',{mode:'cors'}); if(g!==GEN)return; render(await r.json()); }
+  catch(e){ $('pulse').classList.add('dead'); $('livetxt').textContent=ACCT==='real'?'real bot offline — deploys when you give the keys':'offline'; }
+  setTimeout(()=>poll(g),2000);
 }
+document.querySelectorAll('.acct').forEach(el=>el.classList.toggle('on',el.dataset.a===ACCT));
 connect();
 </script>
 </body>

@@ -50,6 +50,7 @@ function start(bus) {
       ...Object.keys(bus.market || {}),
       ...Object.keys(bus.state.t212.positions || {}),
       ...(bus.tvHot || []),
+      ...((bus.newsRadar && bus.newsRadar.trumpAssets && bus.newsRadar.trumpAssets.syms) || []),  // his holdings always tracked
     ]);
     const key = [...tracked].sort().join(',').slice(0, 500) + ':' + tracked.size;
     if (key === matcherKey) return;

@@ -88,6 +88,36 @@ const SOURCES = [
   ['https://www.freightwaves.com/feed', 'FreightWaves', 'US'],
   ['https://www.mining.com/feed/', 'Mining', 'global'],
   ['https://spacenews.com/feed/', 'SpaceNews', 'US'],
+
+  // ═══ TIER 3 — WORLD DESKS (every region, keyless Google News mirrors) ═══
+  ['https://news.google.com/rss/search?q=site:aljazeera.com+business+when:1d&hl=en', 'AlJazeera', 'MENA'],
+  ['https://news.google.com/rss/search?q=site:dw.com+economy+when:1d&hl=en', 'DW', 'EU'],
+  ['https://news.google.com/rss/search?q=site:france24.com+business+when:1d&hl=en', 'France24', 'EU'],
+  ['https://news.google.com/rss/search?q=site:afr.com+when:1d&hl=en-AU', 'AFR', 'AU'],
+  ['https://news.google.com/rss/search?q=site:bnnbloomberg.ca+when:1d&hl=en-CA', 'BNNBloomberg', 'CA'],
+  ['https://news.google.com/rss/search?q=site:caixinglobal.com+when:2d&hl=en', 'Caixin', 'ASIA'],
+  ['https://news.google.com/rss/search?q=site:koreaherald.com+business+when:1d&hl=en', 'KoreaHerald', 'ASIA'],
+  ['https://news.google.com/rss/search?q=site:japantimes.co.jp+business+when:1d&hl=en', 'JapanTimes', 'ASIA'],
+  ['https://news.google.com/rss/search?q=site:barrons.com+when:1d&hl=en-US', 'Barrons', 'US'],
+  ['https://news.google.com/rss/search?q=site:investors.com+when:1d&hl=en-US', 'IBD', 'US'],
+  ['https://news.google.com/rss/search?q=site:institutionalinvestor.com+when:3d&hl=en', 'InstInvestor', 'global'],
+  ['https://news.google.com/rss/search?q=%22emerging+markets%22+OR+brazil+OR+bovespa+when:1d&hl=en', 'GoogleNews', 'EM'],
+
+  // ═══ TRUMP PORTFOLIO LANE — what he/his family actually OWN and trade ═══
+  ['https://news.google.com/rss/search?q=%22Trump+Media%22+OR+%22DJT+stock%22+when:2d&hl=en-US', 'TrumpAssets', 'US'],
+  ['https://news.google.com/rss/search?q=%22World+Liberty+Financial%22+OR+%22WLFI%22+when:3d&hl=en-US', 'TrumpAssets', 'US'],
+  ['https://news.google.com/rss/search?q=%22Trump+coin%22+OR+%22%24TRUMP%22+OR+%22Trump+crypto+portfolio%22+when:2d&hl=en-US', 'TrumpAssets', 'US'],
+  ['https://news.google.com/rss/search?q=%22Trump+Organization%22+deal+OR+investment+OR+stake+when:3d&hl=en-US', 'TrumpAssets', 'US'],
+  ['https://news.google.com/rss/search?q=Trump+family+buys+OR+sells+OR+invests+when:3d&hl=en-US', 'TrumpAssets', 'US'],
+];
+
+// Known Trump-linked tradeable assets — the correlator matches these against T212's
+// universe so any headline about his holdings maps straight onto a tradeable ticker.
+const TRUMP_ASSETS = [
+  { sym: 'DJT', name: 'Trump Media & Technology (Truth Social)', why: 'majority owned by Trump' },
+  { sym: 'COIN', name: 'Coinbase', why: 'proxy for his pro-crypto policy + family crypto ventures' },
+  { sym: 'BTC-ETP', name: 'Bitcoin ETPs', why: 'World Liberty Financial + $TRUMP coin make him crypto-aligned' },
+  { sym: 'PHIN', name: 'Phillips 66 / energy names', why: 'drill-baby-drill policy beneficiaries' },
 ];
 
 // Entities we tag on every headline — the brain agent + trader use these to route impact.
@@ -177,6 +207,13 @@ function start(bus) {
 
       // dedicated Trump lane — his posts + everything quoting him, newest first
       bus.newsRadar.trumpFeed = all.filter(h => h.entities.includes('trump') || h.source === 'TruthSocial').slice(0, 25);
+      // TRUMP PORTFOLIO lane — headlines about what he/family actually OWN, plus the
+      // tradeable tickers those stories map to (fed to the correlator + dashboard)
+      bus.newsRadar.trumpAssets = {
+        assets: TRUMP_ASSETS,
+        syms: TRUMP_ASSETS.map(a => a.sym),
+        headlines: all.filter(h => h.source === 'TrumpAssets' || /trump media|\bDJT\b|world liberty|\$TRUMP|trump organization|trump family/i.test(h.title)).slice(0, 20),
+      };
 
       bus.newsRadar.updated = new Date().toLocaleTimeString();
     }
