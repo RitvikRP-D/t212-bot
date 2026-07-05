@@ -167,6 +167,8 @@ require('./agents/newscorrelate').start(bus); // 🅓 correlator — every headl
 require('./agents/openbell').start(bus);    // 🔔 opening-bell trigger — fresh news+chart re-analysis the instant a venue opens
 require('./lib/fundamentals').start(bus);   // 📊 P/E, growth, D/E, dividends, margins for ~6k names (feeds the desks)
 require('./agents/desks').start(bus);       // 🏦 10 institutional desks: Goldman/MS/Bridgewater/JPM/BlackRock/Citadel/Harvard/Bain/RenTech/McKinsey
+require('./agents/quiver').start(bus);      // 🦌 Quiver Quantitative (OPTIONAL, key-gated) — congress trades + gov contracts
+require('./agents/trumptrades').start(bus); // 🇺🇸 Trump trading desk — linked-equity map + policy themes + congress cross-ref + advisory signals
 require('./agents/stocks').start(bus);      // ① 1-min scanner, 16k universe
 require('./agents/crypto').start(bus);      // ⑩ crypto 24/7 (Binance + crypto news + ETP mapping)
 require('./agents/commodities').start(bus); // ⑫ gold/silver/oil/copper… 24 targets via ~23h futures
@@ -240,6 +242,8 @@ function snapshot() {
     newsCorrStatus: bus.newsCorrStatus || null,
     openBell: bus.openBell ? { lastOpened: bus.openBell.lastOpened, history: bus.openBell.history } : null,
     trumpAssets: (bus.newsRadar && bus.newsRadar.trumpAssets) || null,
+    trump: bus.trump || null,
+    quiver: bus.quiver || null,
     desks: bus.desks || null,
     fundStatus: bus.fundStatus || null,
     blacklist: Object.keys(state.blacklist || {}),

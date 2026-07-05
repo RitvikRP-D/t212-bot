@@ -261,6 +261,18 @@ function start(bus) {
         tvNote += ` · macro ${mt > 0 ? 'tailwind' : 'headwind'} ${mt}`;
       }
     }
+    // TRUMP desk + QUIVER (congress/gov-contracts) — bounded advisory, never a blind follow
+    const tsig = (bus.trumpSignal && bus.trumpSignal[sym]) || 0;
+    if (Math.abs(tsig) > 0.25) {
+      conf = Math.max(0, Math.min(1, conf + tsig * 0.06));
+      if (tsig > 0.4) { votes.push('trump-desk'); tvNote += ` · Trump-linked +${tsig.toFixed(2)}`; }
+      else if (tsig < -0.4) tvNote += ` · Trump headwind ${tsig.toFixed(2)}`;
+    }
+    const qsig = (bus.quiverSignal && bus.quiverSignal[sym]) || 0;
+    if (Math.abs(qsig) > 0.2) {
+      conf = Math.max(0, Math.min(1, conf + qsig * 0.05));
+      if (qsig > 0.35) { votes.push('quiver'); tvNote += ` · congress/gov buying +${qsig.toFixed(2)}`; }
+    }
     mk.lastVotes = votes;
 
     // ——— ENTRY TIMING (#8) — don't catch a falling knife on reversal setups ———

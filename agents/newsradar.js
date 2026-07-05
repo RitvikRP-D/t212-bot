@@ -130,7 +130,7 @@ function start(bus) {
     bus.newsRadar.bySource = agg(h => h.source);
 
     // dedicated lanes
-    bus.newsRadar.trumpFeed = all.filter(h => h.entities.includes('trump') || h.source === 'TruthSocial' || h.source === 'TrumpDesk').slice(0, 40);
+    bus.newsRadar.trumpFeed = all.filter(h => h.entities.includes('trump') || h.source === 'TruthSocial' || h.source === 'TrumpDesk' || h.source === 'WhiteHouse').slice(0, 40);
     bus.newsRadar.cryptoFeed = all.filter(h => h.entities.includes('crypto') || h.region === 'CRYPTO').slice(0, 40);
     bus.newsRadar.trumpAssets = {
       assets: TRUMP_ASSETS, syms: TRUMP_ASSETS.map(a => a.sym),

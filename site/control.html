@@ -182,11 +182,22 @@
 
   <!-- TRUMP -->
   <section id="s-trump">
-    <h2>🇺🇸 Everything Trump <span class="u" id="trump-u">posts · policy · portfolio</span></h2>
-    <div class="panel" style="font-size:10px;color:var(--muted);margin-bottom:8px;">A dedicated desk for the single most market-moving account on earth: his Truth Social posts and every outlet quoting him, what he/his family actually own, and how the fleet routes it into trades.</div>
-    <h2>💼 What he & family own (tradeable)</h2>
-    <div class="panel" id="trumpassets2">gathering…</div>
-    <h2>🗣 His posts + everything quoting him</h2>
+    <h2>🇺🇸 Everything Trump <span class="u" id="trump-u">posts · policy · portfolio · congress</span></h2>
+    <div class="panel narr" id="trumpnarr">reading his posts…</div>
+    <h2>🔥 Live policy focus <span class="u">what he's pushing right now → which names it moves</span></h2>
+    <div class="panel" id="trumpthemes">gathering…</div>
+    <h2>💼 Trump-linked equities <span class="u">beneficiaries (▲) & losers (▼) under his policy · advisory signal</span></h2>
+    <div class="panel" id="trumpmap">gathering…</div>
+    <h2>📈 Trump basket performance <span class="u" id="trumpbasket-u">recent move of the linked names we price</span></h2>
+    <div class="grid2">
+      <div class="panel"><div class="muted" style="font-size:10px;margin-bottom:6px;">▲ LEADERS today</div><div id="trumpleaders" class="muted">—</div></div>
+      <div class="panel"><div class="muted" style="font-size:10px;margin-bottom:6px;">▼ LAGGARDS today</div><div id="trumplaggards" class="muted">—</div></div>
+    </div>
+    <h2>🏛 Politicians buying Trump-linked names <span class="u">free congressional disclosures (house-stock-watcher)</span></h2>
+    <div class="panel" id="trumpcongress">gathering…</div>
+    <h2>🦌 Quiver Quantitative <span class="u" id="quiver-u"></span></h2>
+    <div class="panel" id="quiverbox">checking…</div>
+    <h2>🗣 His posts + White House actions + everything quoting him</h2>
     <div class="panel"><div class="feed" id="trump"></div></div>
   </section>
 
@@ -464,9 +475,36 @@ function render(d){
       <td class="${/BUY/.test(c.tvLabel)?'green':/SELL/.test(c.tvLabel)?'red':'muted'}" style="font-size:10px;">${c.tvLabel?esc(c.tvLabel)+' ('+c.tvRec+')':'—'}</td>
       <td class="muted" style="font-size:10px;">${c.etp?esc(c.etp):'<span style="opacity:.4">no ETP</span>'}</td></tr>`).join('')||'<tr><td class="muted" colspan="7">scanning…</td></tr>';
   }
-  // TRUMP assets (his tab)
-  if(d.trumpAssets&&$('trumpassets2')){
-    $('trumpassets2').innerHTML=(d.trumpAssets.assets||[]).map(a=>`<div class="callrow"><span class="chip amber" style="width:80px;flex-shrink:0;"><b>${esc(a.sym)}</b></span><span><b style="color:var(--text)">${esc(a.name)}</b><br><span class="muted" style="font-size:10px;">${esc(a.why)}</span></span></div>`).join('');
+  // TRUMP desk (his tab)
+  if(d.trump){
+    const T=d.trump;
+    if($('trump-u'))$('trump-u').textContent='updated '+(T.updated||'');
+    if($('trumpnarr'))$('trumpnarr').textContent=T.narrative||'reading his posts…';
+    // policy themes
+    if($('trumpthemes'))$('trumpthemes').innerHTML=Object.entries(T.policyThemes||{}).sort((a,b)=>b[1]-a[1]).map(([t,v])=>`<span class="chip ${v>0.3?'amber':'muted'}">${esc(t)} ${v}</span>`).join('')||'<span class="muted">no hot theme right now</span>';
+    // linked-equity map grouped by category, with advisory signal
+    const cats={};for(const m of (T.owns||[])){(cats[m.cat]=cats[m.cat]||[]).push(m);}
+    if($('trumpmap'))$('trumpmap').innerHTML=Object.entries(cats).map(([cat,list])=>`
+      <div style="margin-bottom:10px;"><div class="muted" style="font-size:10px;font-weight:700;margin-bottom:3px;">${esc(cat)}</div>
+      ${list.map(m=>{const sg=(T.signals&&T.signals[m.sym])||{};const sc=sg.score||0;
+        return `<span class="chip ${m.sign>0?'green':'red'}" title="${esc(m.why)}">${m.sign>0?'▲':'▼'} <b>${esc(m.sym)}</b> ${sc>0?'+':''}${sc}</span>`;}).join('')}</div>`).join('')||'gathering…';
+    // basket
+    if(T.basket){
+      if($('trumpbasket-u'))$('trumpbasket-u').textContent=T.basket.tracked+' names priced · avg '+(T.basket.avg>0?'+':'')+T.basket.avg+'% today';
+      if($('trumpleaders'))$('trumpleaders').innerHTML=(T.basket.leaders||[]).map(l=>`<div class="callrow"><span style="width:60px;font-weight:700;flex-shrink:0;">${esc(l.sym)}</span><span class="${cls(l.ret)}">${l.ret>0?'+':''}${l.ret}%</span> <span class="muted" style="font-size:10px;">${esc(l.name)} ${l.tv?'· '+esc(l.tv):''}</span></div>`).join('')||'—';
+      if($('trumplaggards'))$('trumplaggards').innerHTML=(T.basket.laggards||[]).map(l=>`<div class="callrow"><span style="width:60px;font-weight:700;flex-shrink:0;">${esc(l.sym)}</span><span class="${cls(l.ret)}">${l.ret>0?'+':''}${l.ret}%</span> <span class="muted" style="font-size:10px;">${esc(l.name)}</span></div>`).join('')||'—';
+    }
+    // congress buys in linked names
+    if($('trumpcongress'))$('trumpcongress').innerHTML=(T.congressBuys||[]).length?(T.congressBuys||[]).map(c=>`<div class="callrow"><span style="width:60px;font-weight:700;flex-shrink:0;">${esc(c.sym)}</span><span class="green">${c.count} buy${c.count>1?'s':''}</span> <span class="muted" style="font-size:10px;">${esc(c.name||'')} · ${(c.reps||[]).map(esc).join(', ')}</span></div>`).join(''):'<span class="muted">no recent congressional buys in the Trump-linked set</span>';
+  }
+  // quiver status
+  if(d.quiver){
+    const Q=d.quiver;
+    if($('quiver-u'))$('quiver-u').textContent=Q.enabled?('ACTIVE · '+(Q.updated||'')):'dormant';
+    if($('quiverbox'))$('quiverbox').innerHTML=Q.enabled
+      ?`<div style="margin-bottom:6px;">${(Q.congress||[]).slice(0,12).map(c=>`<span class="chip ${c.buys>c.sells?'green':'red'}">${esc(c.sym)} ${c.buys}B/${c.sells}S</span>`).join('')}</div>
+        <div class="muted" style="font-size:10px;">Gov contracts: ${(Q.contracts||[]).slice(0,10).map(c=>esc(c.sym)).join(', ')||'—'}</div>`
+      :`<span class="muted">${esc(Q.note||'Quiver API is paid — set QUIVER_API_KEY to activate congress trades + gov contracts + political data.')}</span>`;
   }
 
   // FLEET — grouped live board

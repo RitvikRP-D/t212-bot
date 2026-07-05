@@ -34,6 +34,8 @@ function start(bus) {
     ['News', 'deep-news', b => b.deepNews && `${n(b.deepNews.sources)} deep desks · mood ${n(b.deepNews.global)}`],
     ['News', 'crypto-news', b => b.cryptoNews && `crypto desk: mood ${n(b.cryptoNews.global)}`],
     ['News', 'open-bell', b => b.openBell && `last venue open: ${n(b.openBell.lastOpened && (b.openBell.lastOpened.label || b.openBell.lastOpened.venue))}`],
+    ['News', 'trump-desk', b => b.trump && `${(b.trump.owns || []).length} linked equities · ${Object.values(b.trump.policyThemes || {}).filter(v => v > 0.3).length} policy themes hot · ${(b.trump.congressBuys || []).length} congress buys`],
+    ['News', 'quiver', b => b.quiver && (b.quiver.enabled ? `ACTIVE · ${(b.quiver.congress || []).length} congress · ${(b.quiver.contracts || []).length} gov contracts` : 'dormant (needs QUIVER_API_KEY)')],
     // ── 10 INSTITUTIONAL DESKS ──
     ...[['screener', 'Goldman screener'], ['valuation', 'MS DCF'], ['risk', 'Bridgewater risk'], ['earnings', 'JPM earnings'],
         ['portfolio', 'BlackRock portfolio'], ['tech', 'Citadel technicals'], ['dividend', 'Harvard dividend'],
