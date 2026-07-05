@@ -273,6 +273,13 @@ function start(bus) {
       conf = Math.max(0, Math.min(1, conf + qsig * 0.05));
       if (qsig > 0.35) { votes.push('quiver'); tvNote += ` · congress/gov buying +${qsig.toFixed(2)}`; }
     }
+    // EIGHT COMMODITY DESKS — bounded advisory on the mapped commodity ETCs
+    const cd = (bus.commodDeskSignal && bus.commodDeskSignal[sym]) || null;
+    if (cd && Math.abs(cd.score) > 0.04) {
+      conf = Math.max(0, Math.min(1, conf + cd.score * 0.6));
+      if (cd.score > 0.05) { votes.push('commodity-desk'); tvNote += ` · ${String(cd.why).slice(0, 40)} +${cd.score.toFixed(2)}`; }
+      else if (cd.score < -0.05) tvNote += ` · commodity desk bearish ${cd.score.toFixed(2)}`;
+    }
     mk.lastVotes = votes;
 
     // ——— ENTRY TIMING (#8) — don't catch a falling knife on reversal setups ———

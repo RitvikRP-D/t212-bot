@@ -39,6 +39,7 @@ const ENTITIES = {
   ai: /\bai\b|artificial intelligence|nvidia|chatgpt|semiconductor|\bchip[s]?\b|data ?cent(er|re)/i,
   crypto: /bitcoin|crypto|ethereum|\bbtc\b|\beth\b|coinbase|stablecoin|\bxrp\b|solana/i,
   gold: /\bgold\b|bullion|precious metal|safe ?haven/i,
+  commodity: /\bcommodit|crude|\bwti\b|brent|\bopec\b|natural gas|\bsilver\b|platinum|palladium|\bcopper\b|aluminium|aluminum|\bnickel\b|\bzinc\b|iron ore|\bwheat\b|\bcorn\b|soybean|\bcoffee\b|\bcocoa\b|\bsugar\b|\bcotton\b|lithium|uranium|rare earth|battery metal/i,
   defense: /defen[cs]e|missile|weapon|military spend|nato|arms deal|lockheed|raytheon/i,
   shipping: /red sea|suez|shipping|freight|tanker|strait of hormuz|container/i,
   recession: /recession|slowdown|hard landing|contraction|layoff|jobless/i,
@@ -168,6 +169,21 @@ function start(bus) {
     const coinAgg = {};
     for (const h of cryptoHeads) for (const [c, re] of Object.entries(COIN_RE)) if (re.test(h.title)) (coinAgg[c] = coinAgg[c] || []).push(h);
     bus.newsRadar.cryptoByCoin = Object.entries(coinAgg).map(([coin, hs]) => ({ coin, n: hs.length, score: +(hs.reduce((a, h) => a + h.score, 0) / hs.length).toFixed(2), top: hs.slice(0, 3).map(h => ({ title: h.title, url: h.url, source: h.source, score: h.score })) })).sort((a, b) => b.n - a.n);
+
+    // COMMODITY news mapped per commodity — so each desk gets its own live sentiment
+    const commodHeads = all.filter(h => h.entities.includes('commodity') || h.region === 'COMMODITY' || h.entities.includes('opec') || h.entities.includes('gold'));
+    bus.newsRadar.commodFeed = commodHeads.slice(0, 40).map(h => ({ title: h.title, url: h.url, source: h.source, score: h.score, at: h.at }));
+    const COMMOD_RE = {
+      oil: /\boil\b|crude|\bwti\b|brent|\bopec\b|petroleum|barrel/i, natgas: /natural gas|\bLNG\b|\bnat-?gas\b/i,
+      gold: /\bgold\b|bullion/i, silver: /\bsilver\b/i, platinum: /platinum|palladium/i,
+      copper: /\bcopper\b/i, aluminium: /alumini?um/i, nickel: /\bnickel\b|\bzinc\b|\btin\b/i, ironore: /iron ore/i,
+      wheat: /\bwheat\b/i, corn: /\bcorn\b/i, soybeans: /soybean/i,
+      coffee: /\bcoffee\b/i, cocoa: /\bcocoa\b/i, sugar: /\bsugar\b/i, cotton: /\bcotton\b/i,
+      lithium: /lithium|battery metal/i, uranium: /uranium|nuclear fuel/i, rareearth: /rare earth|cobalt/i,
+    };
+    const cAgg = {};
+    for (const h of commodHeads) for (const [c, re] of Object.entries(COMMOD_RE)) if (re.test(h.title)) (cAgg[c] = cAgg[c] || []).push(h);
+    bus.newsRadar.commodByType = Object.entries(cAgg).map(([commodity, hs]) => ({ commodity, n: hs.length, score: +(hs.reduce((a, h) => a + h.score, 0) / hs.length).toFixed(2), top: hs.slice(0, 3).map(h => ({ title: h.title, url: h.url, source: h.source, score: h.score })) })).sort((a, b) => b.n - a.n);
     bus.newsRadar.trumpAssets = {
       assets: TRUMP_ASSETS, syms: TRUMP_ASSETS.map(a => a.sym),
       headlines: all.filter(h => h.source === 'TrumpDesk' || /trump media|\bDJT\b|world liberty|\$TRUMP|trump organization|trump family/i.test(h.title)).slice(0, 20),

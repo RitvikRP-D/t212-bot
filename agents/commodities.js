@@ -40,16 +40,27 @@ const BOOTSTRAP_ETCs = {
   gold: { etp: 'RMAU.L', name: 'Royal Mint Responsibly Sourced Physical Gold' },
   silver: { etp: 'PHAG.L', name: 'WisdomTree Physical Silver' },
   platinum: { etp: 'SPPT.L', name: 'WisdomTree Physical Platinum' },
-  palladium: null,
-  copper: null,
-  'wti-oil': null, 'brent-oil': null, 'natgas': null,
+  palladium: { etp: 'PHPD.L', name: 'WisdomTree Physical Palladium' },
+  copper: { etp: 'COPA.L', name: 'WisdomTree Copper' },
+  'wti-oil': { etp: 'CRUD.L', name: 'WisdomTree WTI Crude Oil' },
+  'brent-oil': { etp: 'BRNT.L', name: 'WisdomTree Brent Crude Oil' },
+  'natgas': { etp: 'NGAS.L', name: 'WisdomTree Natural Gas' },
   wheat: { etp: 'WEAT.L', name: 'Wisdomtree Wheat' },
   corn: { etp: 'CORN.MI', name: 'WisdomTree Corn' },
   soybeans: { etp: 'ESOY.MI', name: 'WisdomTree Soybeans - EUR Daily Hedged' },
   coffee: { etp: 'COFF.L', name: 'WisdomTree Coffee' },
   sugar: { etp: 'SUGA.L', name: 'WisdomTree Sugar' },
-  cocoa: null, cotton: null, cattle: null,
-  aluminium: null, nickel: null, zinc: null, uranium: null, lithium: null, carbon: null, agri: null, broad: null,
+  cocoa: { etp: 'COCO.L', name: 'WisdomTree Cocoa' },
+  cotton: { etp: 'COTN.L', name: 'WisdomTree Cotton' },
+  cattle: null,
+  aluminium: { etp: 'ALUM.L', name: 'WisdomTree Aluminium' },
+  nickel: { etp: 'NICK.L', name: 'WisdomTree Nickel' },
+  zinc: { etp: 'ZINC.L', name: 'WisdomTree Zinc' },
+  uranium: { etp: 'URNM.L', name: 'Sprott Uranium Miners ETF' },
+  lithium: { etp: 'LITG.L', name: 'Global X Lithium & Battery Tech' },
+  carbon: { etp: 'CARB.L', name: 'WisdomTree Carbon' },
+  agri: { etp: 'AGAP.L', name: 'WisdomTree Agriculture' },
+  broad: { etp: 'AIGC.L', name: 'WisdomTree Broad Commodities' },
 };
 
 function start(bus) {
@@ -75,26 +86,43 @@ function start(bus) {
   }
   mapETCs(); setInterval(mapETCs, 120000);
 
+  // fetch 1-min candles for a symbol from Yahoo; returns parsed arrays or null
+  async function fetchChart(sym) {
+    for (const host of ['query1.finance.yahoo.com', 'query2.finance.yahoo.com']) {
+      try {
+        const r = await fetch(`https://${host}/v8/finance/chart/${encodeURIComponent(sym)}?interval=1m&range=1d`,
+          { headers: { 'User-Agent': 'Mozilla/5.0 (Macintosh) AppleWebKit/537.36' } });
+        if (!r.ok) continue;
+        const j = await r.json();
+        const res = j.chart && j.chart.result && j.chart.result[0];
+        if (!res || !res.indicators || !res.indicators.quote) continue;
+        const q = res.indicators.quote[0];
+        const opens = [], highs = [], lows = [], closes = [], vols = [];
+        for (let i = 0; i < (q.close || []).length; i++) {
+          if (q.close[i] == null) continue;
+          closes.push(q.close[i]); opens.push(q.open?.[i] ?? q.close[i]);
+          highs.push(q.high?.[i] ?? q.close[i]); lows.push(q.low?.[i] ?? q.close[i]); vols.push(q.volume?.[i] ?? 0);
+        }
+        if (closes.length < 30) continue;
+        return { res, opens, highs, lows, closes, vols };
+      } catch (e) { /* try next host */ }
+    }
+    return null;
+  }
+
   async function scan(t) {
     const c = bus.commod[t.key] = bus.commod[t.key] || {};
-    // futures give 23h/day signal; ETC price itself when no future exists (venue hours only)
-    const sym = t.fut || c.etp;
-    if (!sym) return;
+    // Try the future first (23h/day signal). Yahoo increasingly blocks =F futures symbols,
+    // so FALL BACK to the mapped ETC/ETF price (what we actually trade) — this keeps every
+    // desk populated even when futures are unavailable.
+    if (!t.fut && !c.etp) return;
     try {
-      const r = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?interval=1m&range=1d`,
-        { headers: { 'User-Agent': 'Mozilla/5.0 (Macintosh) AppleWebKit/537.36' } });
-      if (!r.ok) { bus.commodStatus.errors++; return; }
-      const j = await r.json();
-      const res = j.chart && j.chart.result && j.chart.result[0];
-      if (!res) return;
-      const q = res.indicators.quote[0];
-      const opens = [], highs = [], lows = [], closes = [], vols = [];
-      for (let i = 0; i < (q.close || []).length; i++) {
-        if (q.close[i] == null) continue;
-        closes.push(q.close[i]); opens.push(q.open?.[i] ?? q.close[i]);
-        highs.push(q.high?.[i] ?? q.close[i]); lows.push(q.low?.[i] ?? q.close[i]); vols.push(q.volume?.[i] ?? 0);
-      }
-      if (closes.length < 30) return;
+      let data = t.fut ? await fetchChart(t.fut) : null;
+      let priceSrc = data ? 'futures' : null;
+      if (!data && c.etp) { data = await fetchChart(c.etp); priceSrc = data ? 'ETC' : null; }
+      if (!data) { bus.commodStatus.errors++; return; }
+      const { res, opens, highs, lows, closes, vols } = data;
+      c.priceSrc = priceSrc;
       c.closes = closes.slice(-120);
       Object.assign(c, extendedMetrics(opens.slice(-120), highs.slice(-120), lows.slice(-120), closes.slice(-120), vols.slice(-120)));
       c.price = res.meta.regularMarketPrice || closes[closes.length - 1];
@@ -107,7 +135,7 @@ function start(bus) {
       const topic = bus.deepNews && bus.deepNews.perTopic && bus.deepNews.perTopic[t.key.split('-')[0]];
       const ev = evaluate(c, topic || 0, bus.news?.fng?.value ?? null, 1);
       c.conf = ev ? +ev.conf.toFixed(2) : 0;
-      c.why = ev ? `${t.key} futures: ` + ev.reasons.join(' · ') : 'no setup';
+      c.why = ev ? `${t.key} (${c.priceSrc}): ` + ev.reasons.join(' · ') : 'no setup';
       c.lastTick = new Date().toLocaleTimeString();
       bus.commodStatus.scanned++;
       bus.commodStatus.lastSym = t.key;

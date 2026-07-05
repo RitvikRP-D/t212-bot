@@ -126,6 +126,7 @@
     <div class="tab" data-t="brain" onclick="tab('brain')">🧠 News Brain</div>
     <div class="tab" data-t="crypto" onclick="tab('crypto')">₿ Crypto</div>
     <div class="tab" data-t="trump" onclick="tab('trump')">🇺🇸 Trump</div>
+    <div class="tab" data-t="commod" onclick="tab('commod')">🛢️ Commodities</div>
     <div class="tab" data-t="positions" onclick="tab('positions')">Positions</div>
     <div class="tab" data-t="desks" onclick="tab('desks')">🏦 Desks</div>
     <div class="tab" data-t="agents" onclick="tab('agents')">All Agents</div>
@@ -211,6 +212,17 @@
     <div class="panel" id="quiverbox">checking…</div>
     <h2>🗣 His posts + White House actions + everything quoting him</h2>
     <div class="panel"><div class="feed" id="trump"></div></div>
+  </section>
+
+  <!-- COMMODITIES -->
+  <section id="s-commod">
+    <h2>🛢️ Eight Commodity Desks <span class="u" id="commod-u">energy · metals · agri · softs · industrial · battery · index · vol</span></h2>
+    <div class="panel" style="font-size:10px;color:var(--muted);margin-bottom:8px;">Each desk reads live futures (~23h/day) + its own world-news lane + market regime, forms a house view, picks the best expression, and folds a bounded advisory vote into the trader on the mapped Trading 212 ETC. Trading 212 has no spot commodities — exposure is via <b>ETCs/ETFs</b> (WisdomTree, iShares, Sprott, Global X…). Never a blind follow.</div>
+    <div id="commoddesks">warming up…</div>
+    <h2>🌍 Commodity news — per commodity <span class="u">world coverage mapped to each commodity, with mood</span></h2>
+    <div class="panel" id="commodbytype">gathering…</div>
+    <h2>📰 Commodity news lane <span class="u">oil, metals, crops, battery metals — live worldwide</span></h2>
+    <div class="panel"><div class="feed" id="commodnews"></div></div>
   </section>
 
   <!-- POSITIONS -->
@@ -414,6 +426,26 @@ function render(d){
       <div class="coinrow"><span style="width:52px;font-weight:700;flex-shrink:0;">${esc(c.coin)}</span><span class="chip ${scoreColor(c.score)}">${(c.score>0?'+':'')+c.score}</span>
       <span class="muted" style="font-size:10px;">${c.n} stories · ${A((c.top&&c.top[0]&&c.top[0].title||'').slice(0,70),(c.top&&c.top[0]&&c.top[0].url))}</span></div>`).join(''):'<span class="muted">no coin-specific crypto news this cycle</span>';
   }
+
+  // COMMODITY DESKS
+  if(d.commodDesks){
+    const cd=d.commodDesks;
+    const order=['energy','precious','agri','softs','industrial','battery','index','vol'];
+    if($('commod-u')){const sum=d.commodDesksSummary||[];$('commod-u').textContent=sum.map(s=>s.emoji+s.stance[0]).join(' ')+' · '+sum.filter(s=>s.stance!=='NEUTRAL').length+'/8 active';}
+    if($('commoddesks'))$('commoddesks').innerHTML=order.map(k=>cd[k]).filter(Boolean).map(x=>{
+      const col=x.houseScore>0.25?'green':x.houseScore<-0.25?'red':'muted';
+      const mem=(x.members||[]).map(m=>`<span class="chip ${m.combined>0.15?'green':m.combined<-0.15?'red':''}" title="${esc(m.why)}">${esc(m.key)} ${m.pct24h!=null?(m.pct24h>0?'+':'')+m.pct24h+'%':''}${m.trend>0?'↑':m.trend<0?'↓':''}${m.rsi!=null?' r'+Math.round(m.rsi):''}</span>`).join(' ');
+      return `<div class="catcard"><div class="ch"><span>${x.emoji} <b>${esc(x.name)}</b> <span class="chip ${col}">${x.stance} ${(x.houseScore>0?'+':'')+x.houseScore}</span></span><span class="muted" style="font-size:9px;">${esc(x.regime||'')} · ${esc(x.updated||'')}</span></div>
+        <div style="margin:4px 0;">${mem||'<span class="muted">no live prices yet</span>'}</div>
+        ${x.pick?`<div style="font-size:10px;"><b style="color:var(--text)">Best pick:</b> ${esc(x.pick.key)} → ${esc(x.pick.etpName||x.pick.etp||'')} <span class="chip ${x.pick.combined>0?'green':'muted'}">${(x.pick.combined>0?'+':'')+x.pick.combined}</span></div>`:''}
+        <div class="muted" style="font-size:9.5px;margin-top:3px;">${esc(x.narrative||'')}</div></div>`;
+    }).join('')||'<div class="muted">warming up…</div>';
+  }
+  if(d.commodByType&&$('commodbytype'))$('commodbytype').innerHTML=(d.commodByType||[]).length?(d.commodByType||[]).map(c=>`
+    <div class="coinrow"><span style="width:74px;font-weight:700;flex-shrink:0;">${esc(c.commodity)}</span><span class="chip ${scoreColor(c.score)}">${(c.score>0?'+':'')+c.score}</span>
+    <span class="muted" style="font-size:10px;">${c.n} stories · ${A((c.top&&c.top[0]&&c.top[0].title||'').slice(0,66),(c.top&&c.top[0]&&c.top[0].url))}</span></div>`).join(''):'<span class="muted">gathering commodity news…</span>';
+  if(d.commodFeed&&$('commodnews'))$('commodnews').innerHTML=(d.commodFeed||[]).length?(d.commodFeed||[]).map(h=>`
+    <div class="hl"><span class="src">${esc(h.source)}</span><span>${A(h.title,h.url)} <span class="muted" style="font-size:9px;">${ago(h.at)}</span></span><span class="score ${scoreColor(h.score)}">${(h.score>0?'+':'')+h.score}</span></div>`).join(''):'<div class="muted" style="padding:8px;">gathering commodity headlines…</div>';
 
   // NEWS → STOCKS CORRELATIONS
   if(d.newsCorrStatus){

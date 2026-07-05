@@ -173,6 +173,7 @@ require('./agents/trumptrades').start(bus); // 🇺🇸 Trump trading desk — l
 require('./agents/stocks').start(bus);      // ① 1-min scanner, 16k universe
 require('./agents/crypto').start(bus);      // ⑩ crypto 24/7 (Binance + crypto news + ETP mapping)
 require('./agents/commodities').start(bus); // ⑫ gold/silver/oil/copper… 24 targets via ~23h futures
+require('./agents/commoditydesks').start(bus); // ⑫b eight commodity desks (energy/precious/agri/softs/industrial/battery/index/vol)
 require('./agents/tvanalyst').start(bus);   // ⑥ TradingView stocks analyst (8 markets)
 require('./agents/cryptotv').start(bus);    // ⑪ TradingView crypto analyst (multi-timeframe, ~10.5k metrics)
 require('./agents/history').start(bus);     // ⑭ historian — monthly data back to 1927
@@ -232,6 +233,9 @@ function snapshot() {
     risk: bus.riskStatus, medic: bus.medicStatus, sentinel: bus.sentinelStatus,
     crypto: { status: bus.cryptoStatus, top: cryptoTop, news: { global: (bus.cryptoNews || {}).global, updated: (bus.cryptoNews || {}).updated, headlines: ((bus.cryptoNews || {}).headlines || []).slice(0, 5) } },
     cryptoTV: bus.ctvStatus, commodities: { status: bus.commodStatus, top: commodTop },
+    commodDesks: bus.commodDesks || null, commodDesksSummary: bus.commodDesksSummary || null,
+    commodByType: (bus.newsRadar && bus.newsRadar.commodByType) || null,
+    commodFeed: (bus.newsRadar && bus.newsRadar.commodFeed) || null,
     deepNews: { global: (bus.deepNews || {}).global, perTopic: (bus.deepNews || {}).perTopic, sources: (bus.deepNews || {}).sources, updated: (bus.deepNews || {}).updated, headlines: ((bus.deepNews || {}).headlines || []).slice(0, 6) },
     historian: bus.histStatus, ranker: bus.rankStatus, marketMap: bus.marketMap, alloc: bus.allocStatus,
     earnings: { count: (bus.earnings || {}).count, updated: (bus.earnings || {}).updated }, alerts: bus.alertStatus,
