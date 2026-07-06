@@ -76,11 +76,11 @@ const PROFILES = {
   },
   real: {
     name: 'real', perTradeCap: 0.25, sizeBase: 0.08, sizeSlope: 0.17,
-    maxOpen: 6, minConf: 0.63, minHoldMin: 25, preferGBP: true,
+    maxOpen: 6, minConf: 0.58, minHoldMin: 25, preferGBP: true,
     nonGbpPenalty: 0.04, minNotionalPerMin: 3000, stopLoss: 0.03, dailyMaxLoss: 0.05,
-    minNetProfit: 0.008,   // never take profit until gain clears fees + 0.8% NET
+    minNetProfit: 0.003,   // never take profit until gain clears fees + 0.3% NET (loosened from 0.8%)
     dailyProfitTarget: 0.03,   // up +3% on the day → bank it, no new entries till tomorrow
-    consensusMin: 2,       // ≥2 independent agent votes required to open (kills lone false-positives)
+    consensusMin: 1,       // ≥1 independent agent vote required to open (loosened from 2)
     sectorCap: 0.5,        // ≤50% of open positions in one sector
     countryCap: 0.67,      // ≤2/3 of open positions in one country/venue
     ladder: true,          // scale out in thirds at +1R / +1.5R / target

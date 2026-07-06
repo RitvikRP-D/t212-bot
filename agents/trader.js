@@ -286,8 +286,7 @@ function start(bus) {
     const reversalSig = /RSI_OVERSOLD|RSI_DIP|DIP_REVERSAL|BB_BOUNCE/.test(ev.sigType || '');
     const cl = mk.closes;
     const turningUp = cl && cl.length >= 2 && cl[cl.length - 1] >= cl[cl.length - 2];
-    let timingBlock = false;
-    if (reversalSig && !turningUp) { if (prof.name === 'real') timingBlock = true; else conf *= 0.85; }
+    if (reversalSig && !turningUp) conf *= 0.85;   // softened: no longer hard-blocks on 'real' profile
 
     // ——— SIGNAL TIME-DECAY (#9) — a setup that's been live a while without triggering is stale ———
     if (!mk._sig || mk._sig.type !== ev.sigType) mk._sig = { type: ev.sigType, at: Date.now() };
@@ -327,7 +326,6 @@ function start(bus) {
     // open by the clock. This is the hard guarantee against the holiday-order trap.
     const minConf = prof.minConf + (recovering ? 0.10 : 0);   // recovery mode demands a bigger edge
     if (state.pause || conf < minConf || !marketOpen(sym) || openCount() >= prof.maxOpen) return;
-    if (timingBlock) { mk.lastWhy = (mk.lastWhy || '') + ' · ⏸ still falling — waiting for the turn'; return; }
     if (votes.length < (prof.consensusMin || 1)) { mk.lastWhy = (mk.lastWhy || '') + ` · ⏸ only ${votes.length} agent vote${votes.length === 1 ? '' : 's'} (need ${prof.consensusMin})`; return; }
     if (bus.perfBlocked && bus.perfBlocked()) { mk.lastWhy = (mk.lastWhy || '') + ' · ⏸ performance cool-off'; return; }
     if (bus.riskGate && !bus.riskGate.canEnter()) return; // RISK GUARDIAN gate
