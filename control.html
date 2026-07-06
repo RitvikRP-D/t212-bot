@@ -393,6 +393,17 @@ function render(d){
      <td class="${(s.lastConf>=0.6)?'green':'muted'}">${((s.lastConf||0)*100).toFixed(0)}%</td>
      <td class="muted" style="max-width:150px;overflow:hidden;text-overflow:ellipsis;">${esc(s.lastWhy)}</td></tr>`).join('');
 
+  // positions (with per-row manual close) — rendered BEFORE the news/desks sections so
+  // a bad field in those can never freeze the money-critical panels
+  $('pos').innerHTML=(d.positions||[]).length?(d.positions||[]).map(p=>`<tr>
+     <td style="font-weight:700;">${esc(p.sym)}</td><td>${money(p.invested)}</td><td>${px(p.entry)}</td><td>${px(p.cur)}</td>
+     <td class="${cls(p.upnl)}">${money(p.upnl)}</td><td class="muted" style="font-size:10px;max-width:120px;overflow:hidden;text-overflow:ellipsis;">${esc(p.reason)}</td>
+     <td><button class="xbtn" onclick="closeOne('${esc(p.sym)}')">SELL</button></td></tr>`).join(''):'<tr><td class="muted" colspan="7">No open positions.</td></tr>';
+
+  // everything below is informational — one malformed field must not stop the
+  // cards/signals/positions/log from live-updating, so it is fenced off
+  try{
+
   // RADAR + WAR + TRUMP LANE
   if(d.newsRadar){
     const r=d.newsRadar;
@@ -483,12 +494,6 @@ function render(d){
       <span class="${h.bias>0.12?'green':h.bias<-0.12?'red':'muted'}" style="font-weight:700;width:150px;flex-shrink:0;">${esc(h.verdict)}</span>
       <span><b style="color:var(--text)">${esc(h.sym)}</b> <span class="${cls(h.bias)}">${(h.bias>0?'+':'')+h.bias}</span><br><span class="muted" style="font-size:10px;">${esc(h.why)}</span></span></div>`).join(''):'<span class="muted">no open positions — nothing for the news to agree or fight with yet</span>';
   }
-
-  // positions (with per-row manual close)
-  $('pos').innerHTML=(d.positions||[]).length?(d.positions||[]).map(p=>`<tr>
-     <td style="font-weight:700;">${esc(p.sym)}</td><td>${money(p.invested)}</td><td>${px(p.entry)}</td><td>${px(p.cur)}</td>
-     <td class="${cls(p.upnl)}">${money(p.upnl)}</td><td class="muted" style="font-size:10px;max-width:120px;overflow:hidden;text-overflow:ellipsis;">${esc(p.reason)}</td>
-     <td><button class="xbtn" onclick="closeOne('${esc(p.sym)}')">SELL</button></td></tr>`).join(''):'<tr><td class="muted" colspan="7">No open positions.</td></tr>';
 
   // DESKS
   if(d.trumpAssets){
@@ -591,6 +596,8 @@ function render(d){
     $('agents').innerHTML=boards.map(([n,b])=>`<div class="ag ${b?'':'dead'}"><b>${n}</b><span class="s">${b?'● live':'● —'}</span></div>`).join('');
   }
 
+  }catch(e){console.warn('render info-section:',e);}
+
   // log
   $('log').innerHTML=(d.history||[]).slice(0,40).map(h=>`<tr>
      <td class="muted" style="font-size:10px;">${esc(h.t)}</td><td style="font-weight:700;">${esc(h.sym)}</td>
@@ -599,22 +606,32 @@ function render(d){
 }
 
 // live stream via SSE, fall back to polling; account switch = clean reconnect
-let ES=null, GEN=0;
+let ES=null, GEN=0, lastMsg=0;
 function connect(reset){
   if(reset){ if(ES){try{ES.close();}catch(e){}} GEN++; $('livetxt').textContent='connecting…'; }
   const g=GEN;
   try{
     ES=new EventSource(API_BASE+'/events');
-    ES.onmessage=e=>{ if(g!==GEN)return; try{render(JSON.parse(e.data));}catch(x){} };
+    ES.onmessage=e=>{ if(g!==GEN)return; lastMsg=Date.now(); try{render(JSON.parse(e.data));}catch(x){console.warn('render:',x);} };
     ES.onerror=()=>{ if(g!==GEN)return; try{ES.close();}catch(e){} setTimeout(()=>poll(g),1500); };
   }catch(e){poll(g);}
 }
 async function poll(g){
   if(g!==GEN)return;
-  try{ const r=await fetch(API_BASE+'/api/state',{mode:'cors'}); if(g!==GEN)return; render(await r.json()); }
+  try{ const r=await fetch(API_BASE+'/api/state',{mode:'cors'}); if(g!==GEN)return; lastMsg=Date.now(); render(await r.json()); }
   catch(e){ $('pulse').classList.add('dead'); $('livetxt').textContent=ACCT==='real'?'real bot offline — deploys when you give the keys':'offline'; }
   setTimeout(()=>poll(g),2000);
 }
+// STALL WATCHDOG — an SSE stream through a cloud proxy can die silently (no error
+// event, the frames just stop). If nothing has arrived for 10s, tear the connection
+// down and reconnect from scratch; if SSE is truly broken the poll fallback takes
+// over. This is what keeps the page live for hours without a manual refresh.
+setInterval(()=>{
+  if(lastMsg && Date.now()-lastMsg>10000){ $('livetxt').textContent='reconnecting…'; connect(true); }
+},5000);
+// a tab left in the background gets its timers throttled — force a fresh connection
+// the moment it becomes visible again so the numbers are never stale
+document.addEventListener('visibilitychange',()=>{ if(!document.hidden && lastMsg && Date.now()-lastMsg>3000) connect(true); });
 document.querySelectorAll('.acct').forEach(el=>el.classList.toggle('on',el.dataset.a===ACCT));
 connect();
 </script>

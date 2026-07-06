@@ -266,7 +266,14 @@ function snapshot() {
     newsAgent: { updated: bus.news.updated, headlines: (bus.news.headlines || []).length, congress: (bus.news.congress || []).length },
     paperCash: +state.paper.balance.toFixed(2),
     realized: +state.realized.toFixed(2),
-    equity: bus.t212Status?.connected ? +((bus.t212Status?.cash || 0) + openVal).toFixed(2) : +(state.paper.balance).toFixed(2),
+    // T212's own account total is authoritative — free cash + blocked cash + invested
+    // at THEIR prices. Local cash+openVal math drifts on stale prices/pending orders
+    // (the audit agent kept flagging 8% divergence), so it is only a fallback.
+    equity: bus.t212Status?.connected
+      ? (isFinite(bus.t212Status?.total) && bus.t212Status.total > 0
+          ? +bus.t212Status.total.toFixed(2)
+          : +((bus.t212Status?.cash || 0) + openVal).toFixed(2))
+      : +(state.paper.balance).toFixed(2),
     openCount: positions.length, closedCount: closed.length,
     winRate: closed.length ? Math.round(wins / closed.length * 100) : null,
     universe: bus.universe.length,
@@ -297,7 +304,12 @@ const server = http.createServer((req, res) => {
   }
   if (req.url === '/api/state') { res.writeHead(200, { 'Content-Type': 'application/json', ...cors }); return res.end(JSON.stringify(snapshot())); }
   if (req.url === '/events') {
-    res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive', ...cors });
+    // X-Accel-Buffering:no stops reverse proxies (Railway edge) from buffering the
+    // stream — without it frames can sit in the proxy and the page looks frozen.
+    res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive', 'X-Accel-Buffering': 'no', ...cors });
+    if (res.flushHeaders) res.flushHeaders();
+    res.write('retry: 3000\n\n');
+    res.write('data: ' + JSON.stringify(snapshot()) + '\n\n');  // first frame immediately, not after 900ms
     const iv = setInterval(() => { try { res.write('data: ' + JSON.stringify(snapshot()) + '\n\n'); } catch (e) {} }, 900);
     req.on('close', () => clearInterval(iv));
     return;
