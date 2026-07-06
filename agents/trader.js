@@ -94,12 +94,17 @@ function start(bus) {
 
   async function reconcile() {
     if (!t212.connected()) return;
+    // cash and portfolio are independent try/catches — a network abort on one (common
+    // against T212's demo API) must never skip the other, especially the portfolio-based
+    // phantom-position cleanup below.
     try {
       const c = await t212.cash();
       if (c.status === 200) {
         bus.t212Status.cash = c.body.free != null ? c.body.free : c.body.total;
         bus.t212Status.total = c.body.total;
       }
+    } catch (e) {}
+    try {
       const p = await t212.portfolio();
       if (p.status === 200 && Array.isArray(p.body)) {
         if (bus.recordTrade) bus.recordTrade();  // reconcile succeeded; bot is alive
