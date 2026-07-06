@@ -124,8 +124,16 @@ function start(bus) {
             console.log('[t212] adopted existing position ' + pos.ticker);
           }
         }
-        for (const [sym, pos] of Object.entries(state.t212.positions))
-          if (!seen.has(pos.t212Ticker) && !pos.pendingFill) delete state.t212.positions[sym];
+        for (const [sym, pos] of Object.entries(state.t212.positions)) {
+          if (!seen.has(pos.t212Ticker) && !pos.pendingFill) { delete state.t212.positions[sym]; continue; }
+          // STALE PENDING-FILL SWEEP: a position awaiting fill confirmation for over 3 min
+          // and absent from the real T212 portfolio is a phantom (order threw/aborted before
+          // this reconcile could confirm it) — purge it so it can't block the symbol forever.
+          if (pos.pendingFill && !seen.has(pos.t212Ticker) && pos.openedAt && Date.now() - pos.openedAt > 3 * 60e3) {
+            console.log(`[t212] purging stale phantom position ${sym} (pendingFill >3min, not on T212)`);
+            delete state.t212.positions[sym];
+          }
+        }
       }
     } catch (e) {}
   }
@@ -407,17 +415,30 @@ function start(bus) {
       const useLimit = prof.name === 'real';
       const limitPx = +(mk.price * 1.003).toFixed(mk.price > 50 ? 2 : mk.price > 1 ? 3 : 5);
       const send = (q) => useLimit ? t212.limitOrder(t212Ticker[sym], q, limitPx) : t212.marketOrder(t212Ticker[sym], q);
-      // T212 instruments differ in allowed quantity precision — retry coarser on 400
-      let r = await send(qty);
-      for (const dp of [2, 1, 0]) {
-        if (r.status !== 400 || !/precision/i.test(JSON.stringify(r.body))) break;
-        const q2 = +(invest / mk.price).toFixed(dp);
-        if (q2 <= 0) break;
-        state.t212.positions[sym].qty = q2;
-        r = await send(q2);
+      // The whole send/retry sequence is wrapped: a network abort/timeout THROWS rather
+      // than returning a status, and without this catch the optimistic position record
+      // above would be orphaned forever (never filled, never reconciled, never retried —
+      // a permanent phantom slot). Treat a throw exactly like a rejected order.
+      let r;
+      try {
+        // T212 instruments differ in allowed quantity precision — retry coarser on 400
+        r = await send(qty);
+        for (const dp of [2, 1, 0]) {
+          if (r.status !== 400 || !/precision/i.test(JSON.stringify(r.body))) break;
+          const q2 = +(invest / mk.price).toFixed(dp);
+          if (q2 <= 0) break;
+          state.t212.positions[sym].qty = q2;
+          r = await send(q2);
+        }
+        // limit rejected for a non-quantity reason (tick size etc.) → fall back to market so the signal still trades
+        if (useLimit && r.status !== 200) r = await t212.marketOrder(t212Ticker[sym], state.t212.positions[sym].qty);
+      } catch (e) {
+        delete state.t212.positions[sym];
+        bus.t212Status.lastError = `order network error: ${e.message}`;
+        (bus.deadLetter = bus.deadLetter || []).push({ sym, ticker: t212Ticker[sym], error: `network: ${e.message}`, t: now(), at: Date.now() });
+        console.log('[t212] ' + bus.t212Status.lastError);
+        return;
       }
-      // limit rejected for a non-quantity reason (tick size etc.) → fall back to market so the signal still trades
-      if (useLimit && r.status !== 200) r = await t212.marketOrder(t212Ticker[sym], state.t212.positions[sym].qty);
       if (r.status === 200) {
         // Order accepted, but keep pendingFill=true until we verify the actual filled quantity via reconcile/orders check
         // This prevents exitCheck from firing a stop-loss in the window where qty is stale (partial fill scenario)
@@ -520,7 +541,9 @@ function start(bus) {
     const pnl = gross - fee;
     if (ledger === 'T212-PRACTICE') {
       p.pendingFill = true;
-      const r = await t212.marketOrder(p.t212Ticker, -p.qty);
+      let r;
+      try { r = await t212.marketOrder(p.t212Ticker, -p.qty); }
+      catch (e) { p.pendingFill = false; bus.t212Status.lastError = `sell network error: ${e.message}`; return; }
       if (r.status !== 200) { p.pendingFill = false; bus.t212Status.lastError = `sell rejected HTTP ${r.status}`; return; }
       bus.t212Status.orders++;
       if (bus.recordTrade) bus.recordTrade();  // successful sell; bot is alive
@@ -540,7 +563,9 @@ function start(bus) {
   async function scaleOut(sym, book, p, mk, fraction, why) {
     const q = +(p.qty * fraction).toFixed(4);
     if (q <= 0 || q >= p.qty) return;
-    const r = await t212.marketOrder(p.t212Ticker, -q);
+    let r;
+    try { r = await t212.marketOrder(p.t212Ticker, -q); }
+    catch (e) { (bus.deadLetter = bus.deadLetter || []).push({ sym, error: `ladder sell network: ${e.message}`, t: now(), at: Date.now() }); return; }
     if (r.status !== 200) { (bus.deadLetter = bus.deadLetter || []).push({ sym, error: `ladder sell HTTP ${r.status}`, t: now(), at: Date.now() }); return; }
     bus.t212Status.orders++;
     const gross = (mk.price - p.entry) * q;
