@@ -58,7 +58,7 @@ function start(bus) {
     // locking the baseline — a half-loaded portfolio reads as a tiny account
     if (!state.risk.baseline) {
       if (!connectedAt) { connectedAt = Date.now(); return; }
-      if (Date.now() - connectedAt < 120e3) return;
+      if (Date.now() - connectedAt < 5e3) return;  // reduced to 5s for fresh start (no positions to reconcile)
       state.risk.baseline = +eq.toFixed(2);
       state.risk.realizedAtBaseline = state.realized || 0;
       incident(`baseline set: ${eq.toFixed(2)} — hard floor ${(eq * (1 - RISK.MAX_DRAWDOWN)).toFixed(2)}`);
