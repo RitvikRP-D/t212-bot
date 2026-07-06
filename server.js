@@ -8,6 +8,9 @@
  * Dashboard: http://localhost:3100 (phone: same Wi-Fi, port 3100)
  * SAFETY: demo.trading212.com hard-coded — the real-money account is unreachable.
  */
+// Cloud hosts (Railway) resolve AAAA first but IPv6 egress to T212/Cloudflare hangs,
+// so every fetch aborts at its timeout. Force IPv4 before anything opens a socket.
+require('dns').setDefaultResultOrder('ipv4first');
 require('./lib/env');
 const http = require('http');
 const fs = require('fs');
@@ -75,20 +78,27 @@ for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { atomicWriteStat
 
 // AUTONOMOUS SAFETY: Dead-man's switch
 // If no successful trade/reconcile for 1h+ during market hours, auto-liquidate (something is stuck)
+let lastDeadManFire = 0;
 setInterval(() => {
   const now = Date.now();
   const minsSinceHealthy = (now - lastHealthy) / 60000;
-  const openPos = Object.keys(state.t212.positions).length;
+  // pendingFill phantoms aren't real T212 holdings — liquidating them just spams
+  // failed sells; reconcile's stale-phantom sweep is the correct cleanup for those.
+  const realPos = Object.values(state.t212.positions).filter(p => p && !p.pendingFill).length;
 
   // Only check during market hours (rough: 7am-10pm UTC covers most markets)
   const hour = new Date().getUTCHours();
   const isMarketHours = hour >= 7 && hour < 22;
 
-  if (isMarketHours && openPos > 0 && minsSinceHealthy > 60) {
-    console.error(`[DEAD-MAN] No activity for ${minsSinceHealthy.toFixed(0)}m with ${openPos} open — auto-liquidating`);
+  // fire at most once per 30 min — re-firing every minute while the API is down
+  // just floods the order queue with sells that can never complete
+  if (isMarketHours && realPos > 0 && minsSinceHealthy > 60 && now - lastDeadManFire > 30 * 60e3) {
+    lastDeadManFire = now;
+    console.error(`[DEAD-MAN] No activity for ${minsSinceHealthy.toFixed(0)}m with ${realPos} open — auto-liquidating`);
     state.pause = true;
+    state.pausedBy = 'deadman';   // reconcile auto-unpauses once the API is healthy again
     if (bus.liquidateAll) bus.liquidateAll(`dead-man switch: no activity for ${minsSinceHealthy.toFixed(0)}m`);
-    if (bus.notify) bus.notify(`🚨 Dead-man switch triggered: no bot activity for 1+ hour. Liquidating ${openPos} open position(s).`);
+    if (bus.notify) bus.notify(`🚨 Dead-man switch triggered: no bot activity for 1+ hour. Liquidating ${realPos} open position(s).`);
     atomicWriteState();
   }
 }, 60000);  // check every 1 minute

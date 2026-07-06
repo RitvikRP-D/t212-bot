@@ -39,13 +39,7 @@ function start(bus) {
     bus.t212Status.scheme = res.scheme;
     bus.t212Status.lastError = null;
     console.log('[t212] CONNECTED to PRACTICE account via ' + res.scheme);
-    try {
-      const c = await t212.cash();
-      if (c.status === 200) {
-        bus.t212Status.cash = c.body.free != null ? c.body.free : c.body.total;
-        bus.t212Status.total = c.body.total;
-      }
-    } catch (e) {}
+    try { await fetchCash(); } catch (e) {}
     await expandUniverse();
     reconcile();
   }
@@ -92,22 +86,48 @@ function start(bus) {
   setInterval(() => { if (!t212.connected()) tryConnect(); }, AUTH_RETRY_MS);
   setInterval(() => { if (t212.connected()) expandUniverse(); }, 3 * 60e3); // keep retrying until the 16k universe lands
 
-  async function reconcile() {
-    if (!t212.connected()) return;
-    // cash and portfolio are independent try/catches — a network abort on one (common
-    // against T212's demo API) must never skip the other, especially the portfolio-based
-    // phantom-position cleanup below.
+  // /equity/account/cash rate-limits far more aggressively than the rest of the API
+  // (observed: hours-long 429 on /cash while summary/portfolio/orders all return 200).
+  // /equity/account/summary carries the same balance data, so fall back to it whenever
+  // /cash is throttled or errors — the dashboard equity must never go stale over this.
+  async function fetchCash() {
     try {
       const c = await t212.cash();
       if (c.status === 200) {
         bus.t212Status.cash = c.body.free != null ? c.body.free : c.body.total;
         bus.t212Status.total = c.body.total;
+        return true;
       }
     } catch (e) {}
+    try {
+      const s = await t212.summary();
+      if (s.status === 200 && s.body && s.body.cash) {
+        bus.t212Status.cash = s.body.cash.availableToTrade;
+        bus.t212Status.total = s.body.totalValue;
+        return true;
+      }
+    } catch (e) {}
+    return false;
+  }
+
+  async function reconcile() {
+    if (!t212.connected()) return;
+    // cash and portfolio are independent try/catches — a network abort on one (common
+    // against T212's demo API) must never skip the other, especially the portfolio-based
+    // phantom-position cleanup below.
+    try { await fetchCash(); } catch (e) {}
     try {
       const p = await t212.portfolio();
       if (p.status === 200 && Array.isArray(p.body)) {
         if (bus.recordTrade) bus.recordTrade();  // reconcile succeeded; bot is alive
+        // the dead-man switch paused us during an API outage — the API answers again,
+        // so trading resumes hands-free (a manual dashboard pause is left alone)
+        if (state.pause && state.pausedBy === 'deadman') {
+          state.pause = false; delete state.pausedBy;
+          console.log('[t212] API healthy again — auto-resuming after dead-man pause');
+          if (bus.notify) bus.notify('✅ T212 API recovered — trading auto-resumed.');
+          bus.markDirty();
+        }
         const seen = new Set();
         const rev = {};
         for (const [y, t] of Object.entries(t212Ticker)) rev[t] = y;
@@ -590,6 +610,9 @@ function start(bus) {
   bus.liquidateAll = async (reason) => {
     console.log('[trader] LIQUIDATE ALL — ' + reason);
     for (const [sym, p] of Object.entries({ ...state.t212.positions })) {
+      // pendingFill = never confirmed on T212; there is nothing to sell — a market
+      // sell for it just errors and re-poisons the queue. Reconcile purges these.
+      if (p.pendingFill) continue;
       const mk = bus.market[sym] || { price: p.entry };
       await closePos(sym, 'T212-PRACTICE', state.t212.positions, p, mk, 'LIQUIDATED: ' + reason);
     }
