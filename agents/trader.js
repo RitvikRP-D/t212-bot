@@ -114,6 +114,14 @@ function start(bus) {
 
   async function reconcile() {
     if (!t212.connected()) return;
+    // paper positions are meaningless (and visually confusing) while the real account is
+    // live — purge any that leaked in through the boot window and reset the toy balance
+    if (Object.keys(state.paper.positions).length) {
+      console.log(`[trader] purging ${Object.keys(state.paper.positions).length} paper position(s) — T212 is connected, the virtual ledger is retired`);
+      state.paper.positions = {};
+      state.paper.balance = 10000;
+      bus.markDirty();
+    }
     // cash and portfolio are independent try/catches — a network abort on one (common
     // against T212's demo API) must never skip the other, especially the portfolio-based
     // phantom-position cleanup below.
@@ -521,7 +529,8 @@ function start(bus) {
       const reserve = Math.max(2, cash * 0.02);          // keep a small cash reserve for fees/slippage
       let invest = Math.min(cash * frac, cash - reserve);
       if (bus.riskGate) invest = bus.riskGate.capInvest(invest); // never > profile per-trade cap of equity
-      if (invest < T212_MIN_ORDER) return;
+      // £8 minimum — a £2 position can never outrun its own spread; fewer, meaningful bets
+      if (invest < Math.max(8, T212_MIN_ORDER)) return;
       const qty = +(invest / mk.price).toFixed(4);
       if (qty <= 0) return;
       state.t212.positions[sym] = { t212Ticker: t212Ticker[sym], entry: mk.price, intendedPrice: mk.price, qty, origQty: qty, invested: invest, opened: now(), openedAt: Date.now(), peak: mk.price, conf, sigType: ev.sigType, reason: mk.lastWhy, votes, variant: VARIANT, pendingFill: true };
@@ -578,7 +587,11 @@ function start(bus) {
       }
       return;
     }
-    // internal virtual ledger until T212 connects
+    // internal virtual ledger — ONLY while T212 is disconnected. When connected, a symbol
+    // missing from t212Ticker (boot window before the universe cache loads, or a genuinely
+    // unmappable name) must NOT silently trade $10k of virtual money next to a £97 real
+    // account — that painted giant phantom positions all over the dashboard.
+    if (t212.connected()) return;
     const sp = state.paper;
     if (sp.positions[sym]) return;
     const frac = Math.min(0.6, 0.05 + conf * 0.55);
@@ -646,6 +659,14 @@ function start(bus) {
       if (prof.name === 'practice' && p.openedAt && heldMin > 90 && Math.abs(gain) < 0.005) {
         closePos(sym, ledger, book, p, mk, `dead money — flat ${heldMin.toFixed(0)}m, recycling the slot`);
         continue;
+      }
+      // BOOK HYGIENE — positions that today's quality bar would never admit (sub-$2 US
+      // micro-caps, names too thin to trade cleanly) don't get grandfathered: once they've
+      // had 30 min and aren't meaningfully winning, free the cash for filtered entries.
+      if (prof.name === 'practice' && ledger === 'T212-PRACTICE' && p.openedAt && heldMin > 30 && gain < 0.01) {
+        const thin = mk.notionalPerMin != null && mk.notionalPerMin < (venue(sym) === 'US' ? 20000 : (prof.minNotionalPerMin || 0));
+        const penny = venue(sym) === 'US' && mk.price < 2;
+        if (thin || penny) { closePos(sym, ledger, book, p, mk, `book hygiene — below today's quality bar (${penny ? 'sub-$2' : 'too thin'})`); continue; }
       }
       const edx = (prof.name === 'real' && bus.earningsInDays) ? bus.earningsInDays(sym) : null;  // days to earnings
       const rDist = Math.min(0.04, Math.max(0.012, (mk.atrPct || 0.0015) * 22));   // ~1R risk distance
