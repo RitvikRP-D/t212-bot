@@ -68,12 +68,15 @@ function nextOpenInfo(){
 // ETCs all enter through the same trader gate.
 const PROFILES = {
   practice: {
-    name: 'practice', perTradeCap: 0.35, sizeBase: 0.15, sizeSlope: 0.40,   // spread the book — churn on one 90% bet is fatal
+    // MAX-VARIANCE MODE (user-ordered, PRACTICE/demo money only — live is hard-locked to
+    // the conservative profile): concentrated bets, no profit lock, deep loss tolerance.
+    name: 'practice', perTradeCap: 0.90, sizeBase: 0.30, sizeSlope: 0.60,
     maxOpen: 999,               // slots bounded only by cash (T212 min order £1.50 is the real floor)
-    quickTake: 0.01,            // bank ANY position at +1% net and rotate into the next mover
+    quickTake: 0.01,            // momentum-trail arms at +1% net; runners ride until they turn
     minConf: 0.55, minHoldMin: 0, preferGBP: false,
-    nonGbpPenalty: 0, minNotionalPerMin: 5000, stopLoss: 0.018, dailyMaxLoss: 0.06,   // 5k/min floor: no unfillable junk
-    minNetProfit: 0, dailyProfitTarget: 0.08,
+    nonGbpPenalty: 0, minNotionalPerMin: 5000, stopLoss: 0.018, dailyMaxLoss: 0.15,   // 5k/min floor: no unfillable junk
+    minNetProfit: 0, dailyProfitTarget: 0,     // 0 = never stop compounding a good day
+    maxDrawdown: 0.50,          // hard halt only at −50% (real profile keeps the −10% floor)
     consensusMin: 1, sectorCap: 1.0, countryCap: 1.0, ladder: false,
     recoveryTrigger: 0.06, overnightHold: true,   // #1 fix: enable overnight hold on practice too
     overnightMinProfit: 0.001,  // #2 fix: don't hold unless gain > 0.1% net (beats fees)

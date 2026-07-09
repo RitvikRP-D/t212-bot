@@ -44,6 +44,9 @@ function start(bus) {
   }
 
   let connectedAt = null;
+  // hard-halt drawdown floor is per-profile: practice (demo money) may run a deep
+  // max-variance floor; the real profile always keeps the tight RISK.MAX_DRAWDOWN
+  const mdd = () => (bus.profile && bus.profile.maxDrawdown) || RISK.MAX_DRAWDOWN;
   function check() {
     bus.riskStatus.checked = new Date().toLocaleTimeString();
     if (bus.beat) bus.beat('risk');
@@ -61,7 +64,7 @@ function start(bus) {
       if (Date.now() - connectedAt < 5e3) return;  // reduced to 5s for fresh start (no positions to reconcile)
       state.risk.baseline = +eq.toFixed(2);
       state.risk.realizedAtBaseline = state.realizedT212 || 0;
-      incident(`baseline set: ${eq.toFixed(2)} — hard floor ${(eq * (1 - RISK.MAX_DRAWDOWN)).toFixed(2)}`);
+      incident(`baseline set: ${eq.toFixed(2)} — hard floor ${(eq * (1 - mdd())).toFixed(2)}`);
     }
     // ─── AUTO-BASELINE: keep the risk floor synced to the ACTUAL account, hands-free ───
     // No button, no clicking. The baseline tracks deposits, withdrawals and practice-account
@@ -109,7 +112,8 @@ function start(bus) {
       incident(`daily profit target hit +${(dayGain * 100).toFixed(1)}% — locked in, no new entries until tomorrow`);
     }
 
-    const floor = state.risk.baseline * (1 - RISK.MAX_DRAWDOWN);
+    const floor = state.risk.baseline * (1 - mdd());
+    bus.riskStatus.maxDrawdownPct = mdd() * 100;
     const dayFloor = (state.risk.dayStart || eq) * (1 - (bus.profile.dailyMaxLoss || RISK.DAILY_MAX_LOSS));
     bus.riskStatus.baseline = +state.risk.baseline.toFixed(2);
     bus.riskStatus.floor = +floor.toFixed(2);
@@ -121,7 +125,7 @@ function start(bus) {
     const below = state.risk.baseline ? (state.risk.baseline - eq) / state.risk.baseline : 0;
     const recTrig = (bus.profile && bus.profile.recoveryTrigger) || 0.05;
     const wasRecovering = bus.riskStatus.recovery;
-    bus.riskStatus.recovery = !bus.riskStatus.halted && below > recTrig && below < RISK.MAX_DRAWDOWN;
+    bus.riskStatus.recovery = !bus.riskStatus.halted && below > recTrig && below < mdd();
     if (bus.riskStatus.recovery && !wasRecovering) incident(`recovery mode ON — ${(below * 100).toFixed(1)}% below baseline; sizing/entries tightened`);
     if (!bus.riskStatus.recovery && wasRecovering) incident('recovery mode cleared — back near baseline');
 
@@ -129,7 +133,7 @@ function start(bus) {
       bus.riskStatus.halted = true;
       state.risk.halted = true;
       state.risk.haltReason = bus.riskStatus.haltReason =
-        `equity ${eq.toFixed(2)} broke the ${(RISK.MAX_DRAWDOWN * 100).toFixed(0)}% floor (${floor.toFixed(2)}) — HALT + FULL LIQUIDATION`;
+        `equity ${eq.toFixed(2)} broke the ${(mdd() * 100).toFixed(0)}% floor (${floor.toFixed(2)}) — HALT + FULL LIQUIDATION`;
       state.pause = true;
       incident(bus.riskStatus.haltReason);
       if (bus.liquidateAll) bus.liquidateAll('RISK GUARDIAN: max drawdown floor breached');

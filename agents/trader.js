@@ -576,7 +576,7 @@ function start(bus) {
       const cls = mk.closes || [];
       const oneRed = cls.length >= 2 && cls[cls.length - 1] < cls[cls.length - 2];
       const twoRed = cls.length >= 3 && oneRed && cls[cls.length - 2] < cls[cls.length - 3];
-      const turnedDown = gain <= peakGain - 0.003 || twoRed;   // 0.3% off the peak, or two red bars
+      const turnedDown = gain <= peakGain - 0.005 || twoRed;   // 0.5% off the peak, or two red bars — let runners breathe
       // ⚡ momentum entries (SPIKE / opening-range breakout / gap-and-go) all live by
       // scalper rules: ride the momentum, bank the turn, cut fast, never linger.
       if (p.sigType === 'SPIKE' || p.sigType === 'ORB' || p.sigType === 'GAP') {
