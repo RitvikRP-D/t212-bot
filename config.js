@@ -69,7 +69,9 @@ function nextOpenInfo(){
 const PROFILES = {
   practice: {
     name: 'practice', perTradeCap: 0.35, sizeBase: 0.15, sizeSlope: 0.40,   // spread the book — churn on one 90% bet is fatal
-    maxOpen: 10, minConf: 0.55, minHoldMin: 0, preferGBP: false,
+    maxOpen: 999,               // slots bounded only by cash (T212 min order £1.50 is the real floor)
+    quickTake: 0.01,            // bank ANY position at +1% net and rotate into the next mover
+    minConf: 0.55, minHoldMin: 0, preferGBP: false,
     nonGbpPenalty: 0, minNotionalPerMin: 5000, stopLoss: 0.018, dailyMaxLoss: 0.06,   // 5k/min floor: no unfillable junk
     minNetProfit: 0, dailyProfitTarget: 0.08,
     consensusMin: 1, sectorCap: 1.0, countryCap: 1.0, ladder: false,

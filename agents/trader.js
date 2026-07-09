@@ -549,17 +549,23 @@ function start(bus) {
       // ⚡ SPIKE positions live by scalper rules: bank fast, cut fast, never linger.
       if (p.sigType === 'SPIKE') {
         let sWhy = null;
-        if (netGain >= 0.02) sWhy = `⚡ scalp target +${(netGain * 100).toFixed(2)}% net — banking`;
-        else if (peakGain >= 0.012 && gain <= peakGain - 0.008) sWhy = `⚡ spike fading (peak +${(peakGain * 100).toFixed(1)}% → +${(gain * 100).toFixed(1)}%) — banking`;
-        else if (gain <= -0.012) sWhy = `⚡ spike failed ${(gain * 100).toFixed(1)}% — cutting fast`;
-        else if (heldMin > 45 && netGain < 0.004) sWhy = `⚡ spike stalled ${heldMin.toFixed(0)}m — freeing the slot`;
+        if (netGain >= 0.012) sWhy = `⚡ scalp target +${(netGain * 100).toFixed(2)}% net — banking`;
+        else if (peakGain >= 0.008 && gain <= peakGain - 0.005) sWhy = `⚡ spike fading (peak +${(peakGain * 100).toFixed(1)}% → +${(gain * 100).toFixed(1)}%) — banking`;
+        else if (gain <= -0.01) sWhy = `⚡ spike failed ${(gain * 100).toFixed(1)}% — cutting fast`;
+        else if (heldMin > 25 && netGain < 0.004) sWhy = `⚡ spike stalled ${heldMin.toFixed(0)}m — freeing the slot`;
         if (sWhy) { closePos(sym, ledger, book, p, mk, sWhy); continue; }
+      }
+      // QUICK-BANK ROTATION: the whole strategy is take-the-profit-and-move — any position
+      // up past the quickTake threshold gets banked and the cash rotates into the next mover
+      if (prof.quickTake && matured && netGain >= prof.quickTake) {
+        closePos(sym, ledger, book, p, mk, `💰 quick bank +${(netGain * 100).toFixed(2)}% net — rotating to the next mover`);
+        continue;
       }
       // DEAD-MONEY RECYCLER (practice/high-risk): a position flat for 2h+ is a blocked
       // slot — the whole point is rotating capital into whatever is MOVING right now.
       // requires a REAL openedAt — a missing timestamp defaulted heldMin to 999 and
       // insta-dumped every re-adopted position on boot (the 2026-07-09 churn incident)
-      if (prof.name === 'practice' && p.openedAt && heldMin > 120 && Math.abs(gain) < 0.005) {
+      if (prof.name === 'practice' && p.openedAt && heldMin > 90 && Math.abs(gain) < 0.005) {
         closePos(sym, ledger, book, p, mk, `dead money — flat ${heldMin.toFixed(0)}m, recycling the slot`);
         continue;
       }
