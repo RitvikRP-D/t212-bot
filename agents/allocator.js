@@ -40,8 +40,11 @@ function start(bus) {
     bus.allocStatus.queued = Object.keys(state.queue).length;
     if (!bus.riskGate || !bus.riskGate.canEnter()) return;
     for (const [sym, q] of Object.entries(state.queue)) {
+      // stale conviction must not fire at the bell days later with its old confidence
+      if (Date.now() - (q.queuedAt || 0) > 18 * 3600e3) { delete state.queue[sym]; bus.allocStatus.expired++; bus.markDirty(); continue; }
       // keep queued names hot so the scanner refreshes their price around the bell
-      if (bus.tvHot && !bus.tvHot.includes(sym)) bus.tvHot.push(sym);
+      bus.hotExtra = bus.hotExtra || [];
+      if (!bus.hotExtra.some(x => x.sym === sym)) bus.hotExtra.push({ sym, at: Date.now() });
       if (!marketOpen(sym)) continue;
       const mk = bus.market[sym];
       if (!mk || mk.price == null || mk.rsi == null) continue;  // waiting for first live candle

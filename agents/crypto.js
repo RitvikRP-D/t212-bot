@@ -56,7 +56,8 @@ function start(bus) {
     for (const h of hosts) {
       const ac = new AbortController(); const t = setTimeout(() => ac.abort(), 8000);
       try {
-        const r = await fetch(`${h}/api/v3/klines?symbol=${coin}USDT&interval=1m&limit=120`, { signal: ac.signal });
+        // 5m × 288 = a true 24h window, so pct24h is honest (1m×120 was only 2 hours)
+        const r = await fetch(`${h}/api/v3/klines?symbol=${coin}USDT&interval=5m&limit=288`, { signal: ac.signal });
         if (!r.ok) continue;
         const rows = await r.json();
         if (Array.isArray(rows) && rows.length >= 30) { goodHost = h; return rows; }
@@ -84,7 +85,8 @@ function start(bus) {
       // TradingView crypto analyst boost (agent ⑪)
       let conf = ev ? ev.conf : 0, why = ev ? ev.reasons.join(' · ') : 'no setup';
       const tvc = bus.tvCrypto && bus.tvCrypto[coin];
-      if (tvc && ev) { conf = Math.max(0, Math.min(1, conf + tvc.rec * 0.18)); why += ` · TV-crypto ${tvc.label} (${tvc.rec.toFixed(2)})`; }
+      // freshness gate — a dead TradingView feed must not keep boosting live orders
+      if (tvc && ev && Date.now() - (tvc.at || 0) < 30 * 60e3) { conf = Math.max(0, Math.min(1, conf + tvc.rec * 0.18)); why += ` · TV-crypto ${tvc.label} (${tvc.rec.toFixed(2)})`; }
       c.conf = +conf.toFixed(2); c.why = why; c.sigType = ev ? ev.sigType : null;
       c.lastTick = new Date().toLocaleTimeString();
       bus.cryptoStatus.scanned++;

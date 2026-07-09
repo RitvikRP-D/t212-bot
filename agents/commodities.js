@@ -104,6 +104,14 @@ function start(bus) {
           highs.push(q.high?.[i] ?? q.close[i]); lows.push(q.low?.[i] ?? q.close[i]); vols.push(q.volume?.[i] ?? 0);
         }
         if (closes.length < 30) continue;
+        // LSE ETCs quote in GBX pence — normalize like the stock scanner does
+        if (res.meta && res.meta.currency === 'GBp') {
+          for (const a of [opens, highs, lows, closes]) for (let i = 0; i < a.length; i++) a[i] /= 100;
+          if (res.meta.regularMarketPrice) res.meta.regularMarketPrice /= 100;
+          if (res.meta.chartPreviousClose) res.meta.chartPreviousClose /= 100;
+          if (res.meta.previousClose) res.meta.previousClose /= 100;
+          res.meta.currency = 'GBP';
+        }
         return { res, opens, highs, lows, closes, vols };
       } catch (e) { /* try next host */ }
     }
@@ -132,7 +140,9 @@ function start(bus) {
       const m = calcMACD(c.closes);
       if (m) { c.crossUp = m.crossUp; c.crossDown = m.crossDown; }
       // deep-news topic boost (livenews agent tracks gold/oil/rates chatter)
-      const topic = bus.deepNews && bus.deepNews.perTopic && bus.deepNews.perTopic[t.key.split('-')[0]];
+      // livenews keys oil chatter under 'oil' — 'wti-oil'/'brent-oil' must map there, not to 'wti'/'brent'
+      const topicKey = t.key.endsWith('-oil') ? 'oil' : t.key.split('-')[0];
+      const topic = bus.deepNews && bus.deepNews.perTopic && bus.deepNews.perTopic[topicKey];
       const ev = evaluate(c, topic || 0, bus.news?.fng?.value ?? null, 1);
       c.conf = ev ? +ev.conf.toFixed(2) : 0;
       c.why = ev ? `${t.key} (${c.priceSrc}): ` + ev.reasons.join(' · ') : 'no setup';

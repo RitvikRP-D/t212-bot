@@ -58,8 +58,19 @@ function start(bus) {
       const stallMin = (Date.now() - rec.changedAt) / 60000;
       if (stallMin > w.graceMin) {
         stalled++;
-        incident(`${w.name} stalled ${stallMin.toFixed(0)}min (grace ${w.graceMin}) — reviving`);
-        if (bus.revive && bus.revive[w.name]) { try { bus.revive[w.name](); bus.medicStatus.revived++; last[w.name].changedAt = Date.now(); } catch (e) {} }
+        // soft revive if the agent registered a hook. Do NOT reset changedAt here —
+        // that used to mask failed revives forever; only real counter movement clears it.
+        if (bus.revive && bus.revive[w.name]) {
+          incident(`${w.name} stalled ${stallMin.toFixed(0)}min (grace ${w.graceMin}) — soft revive`);
+          try { bus.revive[w.name](); bus.medicStatus.revived++; } catch (e) {}
+        }
+        // ESCALATION — the actual self-healing: an agent wedged past 3× its grace
+        // window is not coming back on its own. Save state and restart the whole
+        // fleet clean (Railway relaunches us; the volume keeps state.json intact).
+        if (stallMin > w.graceMin * 3) {
+          incident(`${w.name} wedged ${stallMin.toFixed(0)}min (3× grace) — full fleet restart to self-heal`);
+          return die();
+        }
       }
     }
     if (stalled >= 4) { strikes++; incident(`${stalled} agents stalled (strike ${strikes}/3)`); } else strikes = 0;

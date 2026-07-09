@@ -197,6 +197,10 @@
   <section id="s-trump">
     <h2>🇺🇸 Everything Trump <span class="u" id="trump-u">posts · policy · portfolio · congress</span></h2>
     <div class="panel narr" id="trumpnarr">reading his posts…</div>
+    <h2>🎤 In his own words <span class="u">latest interviews · conferences · speeches (weighted extra)</span></h2>
+    <div class="panel"><div class="feed" id="trumpspeeches"><span class="muted">listening…</span></div></div>
+    <h2>📅 Scheduled ahead <span class="u">events on his calendar — themes pre-warmed before they happen</span></h2>
+    <div class="panel" id="trumpevents"><span class="muted">nothing detected on the schedule yet</span></div>
     <h2>🔥 Live policy focus <span class="u">what he's pushing right now → which names it moves</span></h2>
     <div class="panel" id="trumpthemes">gathering…</div>
     <h2>💼 Trump-linked equities <span class="u">beneficiaries (▲) & losers (▼) under his policy · advisory signal</span></h2>
@@ -552,6 +556,10 @@ function render(d){
     const T=d.trump;
     if($('trump-u'))$('trump-u').textContent='updated '+(T.updated||'');
     if($('trumpnarr'))$('trumpnarr').textContent=T.narrative||'reading his posts…';
+    if($('trumpspeeches'))$('trumpspeeches').innerHTML=(T.speeches||[]).length?(T.speeches||[]).map(h=>`
+      <div class="hl"><span class="src trump">${esc(h.source)}</span><span>${A(h.title,h.url)} <span class="muted" style="font-size:9px;">${ago(h.at)}</span></span><span class="score ${scoreColor(h.score)}">${(h.score>0?'+':'')+(h.score||0)}</span></div>`).join(''):'<span class="muted">no fresh interviews/conferences in the lane this cycle</span>';
+    if($('trumpevents'))$('trumpevents').innerHTML=(T.events||[]).length?(T.events||[]).map(e=>`
+      <div class="hl"><span class="src">${esc(e.source)}</span><span>${A(e.title,e.url)} ${(e.themes||[]).map(t=>`<span class="tag amber">${t}</span>`).join('')} <span class="muted" style="font-size:9px;">${ago(e.at)}</span></span></div>`).join(''):'<span class="muted">nothing detected on the schedule yet</span>';
     // policy themes
     if($('trumpthemes'))$('trumpthemes').innerHTML=Object.entries(T.policyThemes||{}).sort((a,b)=>b[1]-a[1]).map(([t,v])=>`<span class="chip ${v>0.3?'amber':'muted'}">${esc(t)} ${v}</span>`).join('')||'<span class="muted">no hot theme right now</span>';
     // linked-equity map grouped by category, with advisory signal
@@ -605,29 +613,29 @@ function render(d){
      <td class="${cls(h.pnl||0)}">${h.pnl!=null?money(h.pnl):'—'}</td><td class="muted" style="font-size:10px;max-width:150px;overflow:hidden;text-overflow:ellipsis;">${esc(h.why)}</td></tr>`).join('');
 }
 
-// live stream via SSE, fall back to polling; account switch = clean reconnect
-let ES=null, GEN=0, lastMsg=0;
+// LIVE UPDATES — straight 2s polling. (SSE was tried: Railway's edge proxy buffers
+// event streams, so frames after the first never reach the browser. Polling the
+// snapshot endpoint carries the exact same data and works through any proxy.)
+let GEN=0, lastMsg=0;
 function connect(reset){
-  if(reset){ if(ES){try{ES.close();}catch(e){}} GEN++; $('livetxt').textContent='connecting…'; }
-  const g=GEN;
-  try{
-    ES=new EventSource(API_BASE+'/events');
-    ES.onmessage=e=>{ if(g!==GEN)return; lastMsg=Date.now(); try{render(JSON.parse(e.data));}catch(x){console.warn('render:',x);} };
-    ES.onerror=()=>{ if(g!==GEN)return; try{ES.close();}catch(e){} setTimeout(()=>poll(g),1500); };
-  }catch(e){poll(g);}
+  if(reset){ GEN++; $('livetxt').textContent='connecting…'; }
+  poll(GEN);
 }
 async function poll(g){
   if(g!==GEN)return;
-  try{ const r=await fetch(API_BASE+'/api/state',{mode:'cors'}); if(g!==GEN)return; lastMsg=Date.now(); render(await r.json()); }
+  try{
+    const ac=new AbortController(); const to=setTimeout(()=>ac.abort(),8000);   // a hung fetch must not stop the loop
+    const r=await fetch(API_BASE+'/api/state',{mode:'cors',cache:'no-store',signal:ac.signal});
+    clearTimeout(to);
+    if(g!==GEN)return; lastMsg=Date.now(); render(await r.json());
+  }
   catch(e){ $('pulse').classList.add('dead'); $('livetxt').textContent=ACCT==='real'?'real bot offline — deploys when you give the keys':'offline'; }
   setTimeout(()=>poll(g),2000);
 }
-// STALL WATCHDOG — an SSE stream through a cloud proxy can die silently (no error
-// event, the frames just stop). If nothing has arrived for 10s, tear the connection
-// down and reconnect from scratch; if SSE is truly broken the poll fallback takes
-// over. This is what keeps the page live for hours without a manual refresh.
+// STALL WATCHDOG — if nothing rendered for 12s the poll chain died somehow; start a
+// fresh one. This keeps the page live for hours with zero manual refreshes.
 setInterval(()=>{
-  if(lastMsg && Date.now()-lastMsg>10000){ $('livetxt').textContent='reconnecting…'; connect(true); }
+  if(lastMsg && Date.now()-lastMsg>12000){ $('livetxt').textContent='reconnecting…'; connect(true); }
 },5000);
 // a tab left in the background gets its timers throttled — force a fresh connection
 // the moment it becomes visible again so the numbers are never stale

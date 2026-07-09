@@ -82,8 +82,11 @@ function start(bus) {
     tick++;
     const slice = [];
     for (let i = 0; i < BATCH_SIZE; i++) { slice.push(FEEDS[idx % FEEDS.length]); idx++; }
-    const at = Date.now();
     const results = await Promise.allSettled(slice.map(([url, source]) => fetchHeadlines(url, source, 12)));
+    // stamp AFTER the fetches resolve — batches overlap (12s timeouts vs 5s cadence), and
+    // a slow batch publishing with a batch-START stamp lands "in the past", which made the
+    // correlator's incremental watermark silently drop the whole batch
+    const at = Date.now();
     const fresh = [];
     results.forEach((res, i) => {
       const [, source, region] = slice[i];
@@ -108,12 +111,14 @@ function start(bus) {
     // flow across 690 channels can never blow the heap on a small Railway dyno.
     if (seen.size > 25000) { const drop = seen.size - 25000; let i = 0; for (const k of seen.keys()) { if (i++ >= drop) break; seen.delete(k); } }
 
-    if (fresh.length) {
-      const all = [...fresh, ...bus.newsRadar.headlines].filter(h => at - h.at < TTL).slice(0, WINDOW);
-      bus.newsRadar.headlines = all;
-      bus.newsRadar.total = all.length;
-      recompute(all);
-    }
+    // TTL-prune and recompute EVERY tick, not only when fresh items arrive — during a
+    // feed outage the old code froze sentiment at its pre-outage values indefinitely
+    // while still stamping it 'updated', so nothing downstream could tell it was stale
+    const all = [...fresh, ...bus.newsRadar.headlines].filter(h => at - h.at < TTL).slice(0, WINDOW);
+    bus.newsRadar.headlines = all;
+    bus.newsRadar.total = all.length;
+    recompute(all);
+    if (fresh.length) bus.newsRadar.lastFreshAt = at;   // consumers can gate on true data age
     bus.newsRadar.perTick = fresh.length;
     bus.newsRadar.sources = liveSources.size;
     bus.newsRadar.updated = new Date().toLocaleTimeString();

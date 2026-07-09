@@ -76,8 +76,22 @@ const THEMES = {
   cleanhit:    { re: /green new deal|climate|solar|\bEV\b|electric vehicle|subsid/i, cats: ['Clean energy (headwind)'] },
 };
 
+// ── STANDING PLAYBOOK — four years of his documented interviews, rallies, pressers and
+// executive actions (2022→2026) distilled into a baseline intensity per theme. These are
+// positions he has repeated in interview after interview: universal tariffs & China
+// hawkishness, a pro-crypto/strategic-reserve stance, drill-baby-drill energy policy,
+// higher defence spend / NATO burden-shifting, hardline immigration enforcement,
+// financial deregulation, federal quantum/AI/chips pushes, and hostility to EV/solar
+// subsidies. The floor keeps the desk positioned on his KNOWN agenda even in a quiet
+// news hour; live headlines/speeches can only raise it, never fully erase it.
+const PLAYBOOK = { tariff: 0.45, crypto: 0.40, energy: 0.40, defense: 0.35, immigration: 0.35, dereg: 0.30, quantum: 0.25, cleanhit: 0.35 };
+// his OWN words (interviews, pressers, speeches) move markets harder than reporting
+const SPEECH_RE = /interview|press conference|news conference|presser|speech|remarks|address\b|rally|town hall|oval office|state of the union|says|tells|vows|pledges|warns|announces/i;
+// scheduled/upcoming events — conferences, summits, signings he is about to hold
+const SCHED_RE = /will (speak|meet|hold|sign|announce|visit|address)|to (speak|meet|hold|sign|announce|visit|address)|scheduled|upcoming|later today|this week|next week|tomorrow|summit|expected to/i;
+
 function start(bus) {
-  bus.trump = { owns: MAP, posts: [], policyThemes: {}, congressBuys: [], basket: null, signals: {}, narrative: 'gathering…', quiver: null, updated: null };
+  bus.trump = { owns: MAP, posts: [], speeches: [], events: [], policyThemes: {}, congressBuys: [], basket: null, signals: {}, narrative: 'gathering…', quiver: null, updated: null };
   bus.trumpSignal = {};
   const clamp = (v, lo = -1, hi = 1) => Math.max(lo, Math.min(hi, v));
 
@@ -95,14 +109,31 @@ function start(bus) {
     const radar = bus.newsRadar || {};
     const lane = [...(radar.trumpFeed || []), ...((radar.headlines || []).filter(h => h.source === 'WhiteHouse'))];
 
-    // 1) POLICY THEMES — how hot is each theme in his current posts/news
+    // 1) POLICY THEMES — live intensity from his posts/news, with his OWN spoken words
+    // (interviews/pressers/speeches — incl. today's conference) weighted extra, sitting
+    // on top of the standing 4-year playbook floor so the desk is never blind.
     const themes = {};
     for (const [t, def] of Object.entries(THEMES)) {
       const hits = lane.filter(h => def.re.test(h.title));
-      if (!hits.length) { themes[t] = 0; continue; }
-      const mood = hits.reduce((a, h) => a + (h.score || 0), 0) / hits.length;
-      themes[t] = +clamp(0.35 + hits.length * 0.08 + mood * 0.3).toFixed(2);   // intensity, mostly positive-for-theme
+      let live = 0;
+      if (hits.length) {
+        const speechHits = hits.filter(h => SPEECH_RE.test(h.title)).length;
+        const mood = hits.reduce((a, h) => a + (h.score || 0), 0) / hits.length;
+        live = 0.35 + hits.length * 0.08 + speechHits * 0.10 + mood * 0.3;
+      }
+      themes[t] = +clamp(Math.max(live, PLAYBOOK[t] || 0)).toFixed(2);
     }
+
+    // 1b) SPEECH LANE + SCHEDULED EVENTS — what he said (latest interviews/conferences)
+    // and what he is ABOUT to do; a scheduled event touching a theme warms it up NOW
+    // so the fleet can pre-position instead of reacting after the move.
+    bus.trump.speeches = lane.filter(h => SPEECH_RE.test(h.title)).slice(0, 10)
+      .map(h => ({ source: h.source, title: h.title, url: h.url || '', at: h.at, score: h.score }));
+    bus.trump.events = lane.filter(h => SCHED_RE.test(h.title)).slice(0, 8).map(h => ({
+      source: h.source, title: h.title, url: h.url || '', at: h.at,
+      themes: Object.entries(THEMES).filter(([, d]) => d.re.test(h.title)).map(([t]) => t),
+    }));
+    for (const ev of bus.trump.events) for (const t of ev.themes) themes[t] = +clamp(themes[t] + 0.1).toFixed(2);
 
     // 2) SIGNALS per curated name = base sign × (floor + theme intensity), + direct mentions
     const signals = {}, resolvedSig = {};
@@ -166,6 +197,11 @@ function start(bus) {
   function narrate(themes, signals, basket) {
     const hot = Object.entries(themes).filter(([, v]) => v > 0.3).sort((a, b) => b[1] - a[1]);
     const parts = [];
+    const sp = (bus.trump.speeches || [])[0];
+    if (sp && sp.at && Date.now() - new Date(sp.at).getTime() < 24 * 3600e3)
+      parts.push(`Latest from his own mouth: "${sp.title.slice(0, 90)}" (${sp.source}).`);
+    const ev = (bus.trump.events || [])[0];
+    if (ev) parts.push(`On the calendar: "${ev.title.slice(0, 80)}"${ev.themes.length ? ' → pre-warming ' + ev.themes.join('/') : ''}.`);
     if (hot.length) {
       parts.push(`Trump's live focus: ${hot.slice(0, 3).map(([t, v]) => `${t} (${v})`).join(', ')}.`);
       const benef = MAP.filter(m => hot.some(([t]) => THEMES[t] && THEMES[t].cats.includes(m.cat)) && m.sign > 0).slice(0, 6).map(m => m.sym);

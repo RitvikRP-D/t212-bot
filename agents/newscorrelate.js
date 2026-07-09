@@ -18,17 +18,20 @@ const { sectorOf } = require('../lib/fleet');
 const TICK_MS = 2000;           // fast re-correlation cadence
 const HEADLINE_TTL = 45 * 60e3; // a headline stays "active" for 45 min, then decays out
 
-// Sector/theme keyword → which sectors it hits and the sign a NEGATIVE story implies.
-// (positive story flips the sign.) Used when no single company is named.
+// Sector/theme keyword → sentiment CORRELATION per sector: strength = score × sign,
+// so +1 means the sector moves WITH the headline's sentiment, −1 against it.
+// (Every table uses this one convention — half of them used to be written as
+// "what a negative story implies", which the formula then read backwards, pushing
+// macro news into the trader with the SIGN INVERTED.)
 const THEMES = {
-  rates:    { re: /rate (cut|hike|decision)|federal reserve|\bfomc\b|inflation|\bcpi\b|powell|yields?/i, hits: { tech: -1, reit: -1, finance: +1 }, note: 'rates repricing growth vs banks' },
-  tariff:   { re: /tariff|trade war|import tax|export ban|customs duty/i, hits: { tech: -1, auto: -1, semis: -1, industrials: -1, materials: +1 }, note: 'tariffs squeeze importers & supply chains' },
+  rates:    { re: /rate (cut|hike|decision)|federal reserve|\bfomc\b|inflation|\bcpi\b|powell|yields?/i, hits: { tech: +1, reit: +1, finance: -1 }, note: 'dovish lifts growth/REITs, squeezes bank margins' },
+  tariff:   { re: /tariff|trade war|import tax|export ban|customs duty/i, hits: { tech: +1, auto: +1, semis: +1, industrials: +1, materials: -1 }, note: 'trade-war escalation squeezes importers & supply chains' },
   oil:      { re: /\bopec\b|crude|brent|oil price|barrel|oil output/i, hits: { energy: +1, airlines: -1, travel: -1 }, note: 'oil move: producers vs fuel-burners' },
-  war:      { re: /\bwar\b|missile|invasion|military strike|sanctions|geopolit/i, hits: { energy: +1, defense: +1, gold: +1, airlines: -1, travel: -1 }, note: 'conflict = safety bid + energy/defence' },
+  war:      { re: /\bwar\b|missile|invasion|military strike|sanctions|geopolit/i, hits: { energy: -1, defense: -1, gold: -1, airlines: +1, travel: +1 }, note: 'conflict = safety bid + energy/defence, hits airlines' },
   ai:       { re: /artificial intelligence|\bAI\b|chip demand|data ?cent(er|re)|semiconductor/i, hits: { semis: +1, tech: +1 }, note: 'AI capex → chips & software' },
   crypto:   { re: /bitcoin|ethereum|\bcrypto\b|\bBTC\b|\bETH\b|digital asset/i, hits: { crypto: +1, finance: +1 }, note: 'crypto risk-appetite proxy' },
-  china:    { re: /\bchina\b|beijing|\bPBOC\b|\byuan\b|hang seng/i, hits: { materials: +1, semis: -1, auto: -1 }, note: 'China demand & supply-chain exposure' },
-  recession:{ re: /recession|slowdown|hard landing|layoffs?|contraction|jobless/i, hits: { utilities: +1, consumer: +1, health: +1, auto: -1, airlines: -1, industrials: -1 }, note: 'defensives beat cyclicals in a slowdown' },
+  china:    { re: /\bchina\b|beijing|\bPBOC\b|\byuan\b|hang seng/i, hits: { materials: +1, semis: +1, auto: +1 }, note: 'China demand & supply-chain exposure' },
+  recession:{ re: /recession|slowdown|hard landing|layoffs?|contraction|jobless/i, hits: { utilities: -1, consumer: -1, health: -1, auto: +1, airlines: +1, industrials: +1 }, note: 'defensives beat cyclicals in a slowdown' },
   earnings: { re: /earnings|guidance|profit warning|beats estimates|misses estimates|revenue/i, hits: {}, note: 'earnings catalyst' },
 };
 

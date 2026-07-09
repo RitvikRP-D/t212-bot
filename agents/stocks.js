@@ -29,7 +29,18 @@ function start(bus) {
         lows.push(q.low?.[i] ?? q.close[i]);
         vols.push(q.volume?.[i] ?? 0);
       }
-      if (closes.length < 15) return;
+      // extendedMetrics needs 21 bars — with fewer, stale prior-session vwap/volume
+      // metrics would silently survive against fresh prices right after the open
+      if (closes.length < 21) return;
+      // LSE quotes arrive in GBX PENCE ('GBp') — normalize to pounds BEFORE any math,
+      // or every .L order is sized 100x wrong and P&L/equity mixes pence with pounds
+      if (res.meta.currency === 'GBp') {
+        for (const a of [opens, highs, lows, closes]) for (let i = 0; i < a.length; i++) a[i] /= 100;
+        if (res.meta.regularMarketPrice) res.meta.regularMarketPrice /= 100;
+        if (res.meta.chartPreviousClose) res.meta.chartPreviousClose /= 100;
+        if (res.meta.previousClose) res.meta.previousClose /= 100;
+        res.meta.currency = 'GBP';
+      }
       const mk = bus.market[sym] = bus.market[sym] || {};
       mk.closes = closes.slice(-120);
       Object.assign(mk, extendedMetrics(opens.slice(-120), highs.slice(-120), lows.slice(-120), closes.slice(-120), vols.slice(-120)));
@@ -62,7 +73,11 @@ function start(bus) {
     bus.scanStatus.fullPassMins = +((open.length * SCAN_MS) / 60000).toFixed(1);
     slot++;
     const holdings = Object.keys(bus.state.paper.positions).concat(Object.keys(bus.state.t212.positions));
-    const hot = [...new Set([...holdings, ...(bus.tvHot || []), ...open.filter(s => (bus.market[s]?.lastConf || 0) >= 0.15)])].filter(marketOpen);
+    // hotExtra: additive priority channel (openbell/allocator) — tvanalyst rewrites
+    // bus.tvHot wholesale every 25s, so injections there were wiped almost instantly
+    const extra = (bus.hotExtra || []).filter(x => Date.now() - x.at < 15 * 60e3).map(x => x.sym);
+    if (bus.hotExtra && extra.length !== bus.hotExtra.length) bus.hotExtra = bus.hotExtra.filter(x => Date.now() - x.at < 15 * 60e3);
+    const hot = [...new Set([...holdings, ...extra, ...(bus.tvHot || []), ...open.filter(s => (bus.market[s]?.lastConf || 0) >= 0.15)])].filter(marketOpen);
     if (slot % HOT_EVERY === 0 && hot.length) fetchSym(hot[hotIdx++ % hot.length]);
     else fetchSym(open[fullIdx++ % open.length]);
   }, SCAN_MS);

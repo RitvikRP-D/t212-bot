@@ -60,7 +60,7 @@ function start(bus) {
       if (!connectedAt) { connectedAt = Date.now(); return; }
       if (Date.now() - connectedAt < 5e3) return;  // reduced to 5s for fresh start (no positions to reconcile)
       state.risk.baseline = +eq.toFixed(2);
-      state.risk.realizedAtBaseline = state.realized || 0;
+      state.risk.realizedAtBaseline = state.realizedT212 || 0;
       incident(`baseline set: ${eq.toFixed(2)} — hard floor ${(eq * (1 - RISK.MAX_DRAWDOWN)).toFixed(2)}`);
     }
     // ─── AUTO-BASELINE: keep the risk floor synced to the ACTUAL account, hands-free ───
@@ -74,8 +74,10 @@ function start(bus) {
     // is why a genuine drawdown on OPEN trades still halts correctly and is never masked.
     if (state.risk.baseline > 0 && eq != null && isFinite(eq)) {
       const openCount = Object.keys(state.t212.positions).length + Object.keys(state.paper.positions).length;
-      const realizedNow = state.realized || 0;
-      if (state.risk.realizedAtBaseline == null) state.risk.realizedAtBaseline = realizedNow;  // migrate old state
+      // ONLY the real T212 ledger here — mixing in VIRTUAL paper P&L falsely tripped the
+      // drift detector and silently ratcheted the hard drawdown floor down
+      const realizedNow = state.realizedT212 || 0;
+      if (state.risk.realizedAtBaseline == null || !state.risk._t212LedgerOnly) { state.risk.realizedAtBaseline = realizedNow; state.risk._t212LedgerOnly = true; }  // migrate old mixed-ledger snapshot
       const realizedSince = realizedNow - state.risk.realizedAtBaseline;
       const drift = eq - (state.risk.baseline + realizedSince);
       const ratio = eq / state.risk.baseline;
@@ -86,7 +88,7 @@ function start(bus) {
         if (bus.notify) bus.notify(`💷 Account balance now £${eq.toFixed(2)} — risk floor auto-resynced, no action needed.`);
         state.risk.baseline = +eq.toFixed(2);
         state.risk.dayStart = +eq.toFixed(2);                 // fresh day-start on a balance change
-        state.risk.realizedAtBaseline = realizedNow;
+        state.risk.realizedAtBaseline = state.realizedT212 || 0;
         if (state.risk.halted) { state.risk.halted = false; state.risk.haltReason = null; bus.riskStatus.halted = false; bus.riskStatus.haltReason = null; state.pause = false; }
         bus.riskStatus.dayProfitLock = false; bus.riskStatus.dayPaused = false;
         bus.markDirty();

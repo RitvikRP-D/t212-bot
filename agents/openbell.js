@@ -25,10 +25,10 @@ function start(bus) {
 
   function fireReanalysis(venue, label) {
     const names = heldAndTrackedFor(venue);
-    // 1) front-load these names onto the TradingView hot-list → re-rated first this cycle
-    bus.tvHot = bus.tvHot || [];
-    for (const s of names) if (!bus.tvHot.includes(s)) bus.tvHot.unshift(s);
-    bus.tvHot = bus.tvHot.slice(0, 300);
+    // 1) front-load these names via hotExtra — tvanalyst rewrites bus.tvHot wholesale
+    // every 25s, so unshifting there was wiped almost immediately (scanner merges hotExtra)
+    bus.hotExtra = bus.hotExtra || [];
+    for (const s of names) if (!bus.hotExtra.some(x => x.sym === s)) bus.hotExtra.push({ sym: s, at: Date.now() });
     // 2) signal the fresh-open so scanner/ranker/correlator prioritise a new pass
     bus.freshOpen = { venue, label, at: Date.now(), names: names.length };
     if (bus.forceScan) { try { bus.forceScan(venue); } catch (e) {} }

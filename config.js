@@ -18,6 +18,10 @@ const HOURS = {
   SW: { tz: 'Europe/Zurich',    open: [9,0],  close: [17,30] },
   MI: { tz: 'Europe/Rome',      open: [9,0],  close: [17,30] },
   MC: { tz: 'Europe/Madrid',    open: [9,0],  close: [17,30] },
+  TO: { tz: 'America/Toronto',  open: [9,30], close: [16,0] },
+  VI: { tz: 'Europe/Vienna',    open: [9,0],  close: [17,30] },
+  BR: { tz: 'Europe/Brussels',  open: [9,0],  close: [17,30] },
+  LS: { tz: 'Europe/Lisbon',    open: [8,0],  close: [16,30] },
 };
 function venue(sym){ const p = sym.split('.'); return p.length > 1 ? p[1] : 'US'; }
 function marketOpen(sym){
@@ -77,7 +81,8 @@ const PROFILES = {
   real: {
     name: 'real', perTradeCap: 0.25, sizeBase: 0.08, sizeSlope: 0.17,
     maxOpen: 6, minConf: 0.58, minHoldMin: 25, preferGBP: true,
-    nonGbpPenalty: 0.04, minNotionalPerMin: 3000, stopLoss: 0.03, dailyMaxLoss: 0.05,
+    nonGbpPenalty: 0.015,  // honest FX friction (~0.3% round trip), not a 4-point wall — trade worldwide
+    minNotionalPerMin: 3000, stopLoss: 0.03, dailyMaxLoss: 0.05,
     minNetProfit: 0.003,   // never take profit until gain clears fees + 0.3% NET (loosened from 0.8%)
     dailyProfitTarget: 0.03,   // up +3% on the day → bank it, no new entries till tomorrow
     consensusMin: 1,       // ≥1 independent agent vote required to open (loosened from 2)

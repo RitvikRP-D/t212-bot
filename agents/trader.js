@@ -28,6 +28,7 @@ function start(bus) {
   const state = bus.state;
   bus.t212Status = { connected: false, scheme: null, cash: null, total: null, mapped: 0, lastError: 'connecting…', orders: 0, lastAttempt: null };
   const t212Ticker = {}; // yahoo sym -> t212 ticker
+  const gbxTickers = new Set(); // t212 tickers quoted in GBX pence — their T212 prices need ÷100
 
   async function tryConnect() {
     bus.t212Status.lastAttempt = now();
@@ -54,7 +55,7 @@ function start(bus) {
       const { universe, skipped } = fromInstruments(raw);
       if (universe.length > bus.universe.length) {
         bus.universe = universe;
-        for (const u of universe) t212Ticker[u.y] = u.t212;
+        for (const u of universe) { t212Ticker[u.y] = u.t212; if (u.gbx) gbxTickers.add(u.t212); }
         bus.t212Status.mapped = Object.keys(t212Ticker).length;
         console.log(`[t212] universe loaded from CACHE: ${universe.length} instruments (${skipped} unmappable skipped) — no API wait`);
       }
@@ -70,7 +71,8 @@ function start(bus) {
         if (universe.length > 0 && universe.length !== bus.universe.length) {
           bus.universe = universe;
           for (const k of Object.keys(t212Ticker)) delete t212Ticker[k];  // clear in place — t212Ticker is const
-          for (const u of universe) t212Ticker[u.y] = u.t212;
+          gbxTickers.clear();
+          for (const u of universe) { t212Ticker[u.y] = u.t212; if (u.gbx) gbxTickers.add(u.t212); }
           console.log(`[t212] universe refreshed to ${universe.length} instruments (${skipped} unmappable skipped)`);
           bus.t212Status.mapped = Object.keys(t212Ticker).length;
           // refresh the on-disk cache
@@ -133,18 +135,22 @@ function start(bus) {
         for (const [y, t] of Object.entries(t212Ticker)) rev[t] = y;
         for (const pos of p.body) {
           seen.add(pos.ticker);
+          // T212 reports averagePrice in the instrument's own currency — GBX PENCE for
+          // most .L names — while our market prices are normalized pounds. ÷100 or every
+          // gain/stop calculation on a London position is off by 100x.
+          const avgPx = gbxTickers.has(pos.ticker) ? pos.averagePrice / 100 : pos.averagePrice;
           const local = Object.values(state.t212.positions).find(x => x.t212Ticker === pos.ticker);
           if (local) {
             local.qty = pos.quantity;  // sync with real fill
-            local.entry = pos.averagePrice;
+            local.entry = avgPx;
             local.pendingFill = false;  // fill is now confirmed, safe to exit
             continue;
           }
           // position exists on T212 but not locally (fresh cloud run / lost state) — adopt it so exits keep working
           const sym = rev[pos.ticker];
           if (sym) {
-            state.t212.positions[sym] = { t212Ticker: pos.ticker, entry: pos.averagePrice, qty: pos.quantity,
-              invested: +(pos.averagePrice * pos.quantity).toFixed(2), opened: 'recovered', peak: pos.averagePrice,
+            state.t212.positions[sym] = { t212Ticker: pos.ticker, entry: avgPx, qty: pos.quantity,
+              invested: +(avgPx * pos.quantity).toFixed(2), opened: 'recovered', peak: avgPx,
               conf: 0, sigType: 'adopted', reason: 'recovered from T212 account after restart' };
             console.log('[t212] adopted existing position ' + pos.ticker);
           }
@@ -434,6 +440,10 @@ function start(bus) {
       const qty = +(invest / mk.price).toFixed(4);
       if (qty <= 0) return;
       state.t212.positions[sym] = { t212Ticker: t212Ticker[sym], entry: mk.price, intendedPrice: mk.price, qty, origQty: qty, invested: invest, opened: now(), openedAt: Date.now(), peak: mk.price, conf, sigType: ev.sigType, reason: mk.lastWhy, votes, variant: VARIANT, pendingFill: true };
+      // RESERVE the cash NOW, before any await — orders are spaced ≥2.6s apart in the
+      // t212 queue while ticks fire every 2.5s, so without this several entries all
+      // size against the SAME balance and over-commit (the July-4th £9,996 incident)
+      bus.t212Status.cash = Math.max(0, cash - invest);
       // REAL money uses a MARKETABLE LIMIT — priced a hair through the spread so it fills
       // immediately but can never pay more than +0.3% above mid (caps slippage on 16k names).
       // PRACTICE uses a plain market order. Falls back to market if the venue rejects the limit.
@@ -459,6 +469,7 @@ function start(bus) {
         if (useLimit && r.status !== 200) r = await t212.marketOrder(t212Ticker[sym], state.t212.positions[sym].qty);
       } catch (e) {
         delete state.t212.positions[sym];
+        bus.t212Status.cash = (bus.t212Status.cash || 0) + invest;   // release the reservation
         bus.t212Status.lastError = `order network error: ${e.message}`;
         (bus.deadLetter = bus.deadLetter || []).push({ sym, ticker: t212Ticker[sym], error: `network: ${e.message}`, t: now(), at: Date.now() });
         console.log('[t212] ' + bus.t212Status.lastError);
@@ -468,13 +479,13 @@ function start(bus) {
         // Order accepted, but keep pendingFill=true until we verify the actual filled quantity via reconcile/orders check
         // This prevents exitCheck from firing a stop-loss in the window where qty is stale (partial fill scenario)
         bus.t212Status.orders++;
-        bus.t212Status.cash = Math.max(0, cash - invest);
         pushHist({ t: now(), sym, ledger: 'T212-PRACTICE', action: 'BUY', price: mk.price, qty: state.t212.positions[sym].qty, pnl: null, votes, cond: { rsi: mk.rsi != null ? +mk.rsi.toFixed(1) : null, regime: reg ? reg.state : null, sector: sectorOf(sym), atrPct: mk.atrPct }, why: `${mk.lastWhy} — conf ${(conf*100).toFixed(0)}%, votes[${votes.join(',')}], ~${invest.toFixed(2)} → REAL order on practice account (check your T212 app)` });
         console.log(`[trade] T212 BUY ${t212Ticker[sym]} qty=${state.t212.positions[sym].qty} (awaiting fill confirmation)`);
         if (bus.recordTrade) bus.recordTrade();  // signal health heartbeat: bot is alive
         // pendingFill stays true; reconcile() will verify actual fill and update qty, then it's safe to trade
       } else {
         delete state.t212.positions[sym];
+        bus.t212Status.cash = (bus.t212Status.cash || 0) + invest;   // release the reservation
         bus.t212Status.lastError = `order rejected HTTP ${r.status}: ${JSON.stringify(r.body).slice(0, 140)}`;
         // DEAD-LETTER (#12): hand the failed order to the auditor to surface + alert
         (bus.deadLetter = bus.deadLetter || []).push({ sym, ticker: t212Ticker[sym], error: `HTTP ${r.status}: ${JSON.stringify(r.body).slice(0, 100)}`, t: now(), at: Date.now() });
@@ -499,7 +510,9 @@ function start(bus) {
     if (!mk || mk.price == null) return;
     for (const [book, ledger] of [[state.t212.positions, 'T212-PRACTICE'], [state.paper.positions, 'VIRTUAL']]) {
       const p = book[sym];
-      if (!p || p.pendingFill) continue;
+      // sellInFlight: a SELL is queued/awaiting T212 — re-evaluating the exit would fire
+      // a duplicate sell (reconcile can clear pendingFill mid-flight, so it can't guard this)
+      if (!p || p.pendingFill || p.sellInFlight) continue;
       if (p.forceClose) { closePos(sym, ledger, book, p, mk, 'manual close from dashboard'); continue; }
       if (mk.price > p.peak) p.peak = mk.price;
       const gain = (mk.price - p.entry) / p.entry;
@@ -565,14 +578,17 @@ function start(bus) {
     const fee = frictionPct(sym, bus.profile, mk) * (p.invested || p.entry * p.qty);
     const pnl = gross - fee;
     if (ledger === 'T212-PRACTICE') {
-      p.pendingFill = true;
+      if (p.sellInFlight) return;            // a sell for this position is already on the wire
+      p.sellInFlight = true;                 // NOT pendingFill — reconcile clears that mid-flight
       let r;
       try { r = await t212.marketOrder(p.t212Ticker, -p.qty); }
-      catch (e) { p.pendingFill = false; bus.t212Status.lastError = `sell network error: ${e.message}`; return; }
-      if (r.status !== 200) { p.pendingFill = false; bus.t212Status.lastError = `sell rejected HTTP ${r.status}`; return; }
+      catch (e) { p.sellInFlight = false; bus.t212Status.lastError = `sell network error: ${e.message}`; return; }
+      if (r.status !== 200) { p.sellInFlight = false; bus.t212Status.lastError = `sell rejected HTTP ${r.status}`; return; }
       bus.t212Status.orders++;
       if (bus.recordTrade) bus.recordTrade();  // successful sell; bot is alive
       delete book[sym];
+      bus.t212Status.cash = (bus.t212Status.cash || 0) + p.qty * mk.price;  // approximate credit; reconcile trues up in ≤60s
+      state.realizedT212 = (state.realizedT212 || 0) + pnl;   // real-ledger P&L only — risk baseline math must not see paper P&L
     } else {
       state.paper.balance += p.qty * mk.price;
       delete book[sym];
@@ -588,15 +604,20 @@ function start(bus) {
   async function scaleOut(sym, book, p, mk, fraction, why) {
     const q = +(p.qty * fraction).toFixed(4);
     if (q <= 0 || q >= p.qty) return;
+    if (p.sellInFlight) return;              // never overlap with another sell on this position
+    p.sellInFlight = true;
     let r;
     try { r = await t212.marketOrder(p.t212Ticker, -q); }
-    catch (e) { (bus.deadLetter = bus.deadLetter || []).push({ sym, error: `ladder sell network: ${e.message}`, t: now(), at: Date.now() }); return; }
-    if (r.status !== 200) { (bus.deadLetter = bus.deadLetter || []).push({ sym, error: `ladder sell HTTP ${r.status}`, t: now(), at: Date.now() }); return; }
+    catch (e) { p.sellInFlight = false; (bus.deadLetter = bus.deadLetter || []).push({ sym, error: `ladder sell network: ${e.message}`, t: now(), at: Date.now() }); return; }
+    if (r.status !== 200) { p.sellInFlight = false; (bus.deadLetter = bus.deadLetter || []).push({ sym, error: `ladder sell HTTP ${r.status}`, t: now(), at: Date.now() }); return; }
+    p.sellInFlight = false;
     bus.t212Status.orders++;
     const gross = (mk.price - p.entry) * q;
     const fee = frictionPct(sym, bus.profile, mk) * (p.entry * q);
     const pnl = gross - fee;
     p.qty = +(p.qty - q).toFixed(4);
+    bus.t212Status.cash = (bus.t212Status.cash || 0) + q * mk.price;  // approximate credit; reconcile trues up
+    state.realizedT212 = (state.realizedT212 || 0) + pnl;
     state.realized += pnl;
     learnRecord(p.sigType, sym, pnl);
     pushHist({ t: now(), sym, ledger: 'T212-PRACTICE', action: 'SELL', price: mk.price, qty: q, pnl: +pnl.toFixed(2), why });
@@ -612,7 +633,8 @@ function start(bus) {
     for (const [sym, p] of Object.entries({ ...state.t212.positions })) {
       // pendingFill = never confirmed on T212; there is nothing to sell — a market
       // sell for it just errors and re-poisons the queue. Reconcile purges these.
-      if (p.pendingFill) continue;
+      // sellInFlight = a sell is already on the wire; don't double it.
+      if (p.pendingFill || p.sellInFlight) continue;
       const mk = bus.market[sym] || { price: p.entry };
       await closePos(sym, 'T212-PRACTICE', state.t212.positions, p, mk, 'LIQUIDATED: ' + reason);
     }

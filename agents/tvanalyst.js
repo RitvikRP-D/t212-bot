@@ -104,7 +104,7 @@ function start(bus) {
   bus.tvaStatus = { rated: 0, matched: 0, lastMarket: null, updated: null, errors: 0, metricsPerSymbol: COLS.length };
   let idx = 0;
 
-  async function scanMarket(mkt) {
+  async function fetchRows(mkt, sortOrder, count) {
     const body = {
       filter: [
         { left: 'type', operation: 'in_range', right: ['stock', 'fund'] },
@@ -114,19 +114,27 @@ function start(bus) {
       markets: [mkt.id],
       symbols: { query: { types: [] }, tickers: [] },
       columns: ['name', ...COLS],
-      sort: { sortBy: 'Recommend.All', sortOrder: 'desc' },
-      range: [0, 350],
+      sort: { sortBy: 'Recommend.All', sortOrder },
+      range: [0, count],
     };
     const r = await fetch(`https://scanner.tradingview.com/${mkt.id}/scan`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'User-Agent': 'Mozilla/5.0 (Macintosh) AppleWebKit/537.36' },
       body: JSON.stringify(body),
     });
-    if (!r.ok) { bus.tvaStatus.errors++; return; }
+    if (!r.ok) { bus.tvaStatus.errors++; return []; }
     const j = await r.json();
+    return j.data || [];
+  }
+
+  async function scanMarket(mkt) {
+    // desc window = strongest BUYs; asc window = strongest SELLs. Without the second,
+    // a held name whose rating flips negative just falls out of the top-350 response,
+    // so the STRONG-SELL protective exit (trader.js) could never fire.
+    const rows = [...await fetchRows(mkt, 'desc', 350), ...await fetchRows(mkt, 'asc', 150)];
     const inUni = new Set(bus.universe.map(u => u.y));
     let matched = 0;
-    for (const row of j.data || []) {
+    for (const row of rows) {
       const d = {};
       row.d.forEach((v, i) => { d[i === 0 ? 'name' : COLS[i - 1]] = v; });
       const y = mkt.toY(d.name);

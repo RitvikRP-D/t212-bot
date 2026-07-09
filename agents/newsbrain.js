@@ -17,15 +17,20 @@ const THEME_MAP = {
   tariff:    { good: ['industrials', 'materials'], bad: ['tech', 'auto', 'consumer', 'semis'], label: 'Tariffs / trade', note: 'tariffs hit importers & supply chains' },
   war:       { good: ['energy', 'gold', 'defense', 'industrials'], bad: ['airlines', 'travel', 'consumer'], label: 'War / geopolitics', note: 'conflict = flight to safety + energy/defence bid' },
   opec:      { good: ['energy'], bad: ['airlines', 'travel'], label: 'Oil / OPEC', note: 'oil supply moves energy vs fuel-burners' },
-  gold:      { good: ['gold', 'materials'], bad: [], label: 'Gold', note: 'safe-haven demand' },
-  defense:   { good: ['defense', 'industrials'], bad: [], label: 'Defence', note: 'rising military spend' },
+  // corr:+1 → 'good' sectors move WITH coverage sentiment (an AI boom prints POSITIVE
+  // headlines and lifts semis). Without it (fear themes), good sectors move AGAINST
+  // sentiment (war prints NEGATIVE headlines and lifts defence/gold). The old code
+  // applied the fear-theme rule to everything, so bullish AI/crypto/gold/defence/M&A
+  // news generated BEARISH sector bias.
+  gold:      { good: ['gold', 'materials'], bad: [], corr: 1, label: 'Gold', note: 'safe-haven demand' },
+  defense:   { good: ['defense', 'industrials'], bad: [], corr: 1, label: 'Defence', note: 'rising military spend' },
   shipping:  { good: ['energy', 'materials'], bad: ['airlines', 'consumer'], label: 'Shipping / freight', note: 'freight disruption raises input costs' },
   china:     { good: ['materials', 'energy'], bad: ['tech', 'semis', 'auto'], label: 'China', note: 'China demand & supply-chain exposure' },
-  ai:        { good: ['semis', 'tech'], bad: [], label: 'AI / semis', note: 'AI capex flows to chips & software' },
-  crypto:    { good: ['crypto', 'finance'], bad: [], label: 'Crypto', note: 'crypto risk-appetite proxy' },
+  ai:        { good: ['semis', 'tech'], bad: [], corr: 1, label: 'AI / semis', note: 'AI capex flows to chips & software' },
+  crypto:    { good: ['crypto', 'finance'], bad: [], corr: 1, label: 'Crypto', note: 'crypto risk-appetite proxy' },
   recession: { good: ['utilities', 'consumer', 'health'], bad: ['auto', 'airlines', 'travel', 'industrials'], label: 'Recession risk', note: 'defensives beat cyclicals in a slowdown' },
   earnings:  { good: [], bad: [], label: 'Earnings season', note: 'single-name catalyst risk' },
-  mna:       { good: ['finance'], bad: [], label: 'M&A', note: 'deal activity = risk appetite' },
+  mna:       { good: ['finance'], bad: [], corr: 1, label: 'M&A', note: 'deal activity = risk appetite' },
 };
 
 function start(bus) {
@@ -55,8 +60,9 @@ function start(bus) {
       themes[ent] = +clamp(stat.score).toFixed(2);   // bound to −1..+1 so a few extreme headlines don't print "-1.75"
       if (!map || stat.n < 2) continue;
       const s = clamp(stat.score);
+      const dir = map.corr === 1 ? s : -s;   // see THEME_MAP corr note
       for (const sec of map.bad)  { add('sector:' + sec, s * 0.6, `${map.label} (${s}) → ${map.note}`);  addSec(sec, s * 0.6, ent); }
-      for (const sec of map.good) { add('sector:' + sec, -s * 0.5, `${map.label} (${s}) → ${map.note}`); addSec(sec, -s * 0.5, ent); }
+      for (const sec of map.good) { add('sector:' + sec, dir * 0.5, `${map.label} (${s}) → ${map.note}`); addSec(sec, dir * 0.5, ent); }
     }
 
     // 2) NAMED-INSTRUMENT news, weighted by the historian's verdict
@@ -77,8 +83,9 @@ function start(bus) {
       themes.trump = tScore;
       for (const h of radar.trumpFeed) for (const ent of h.entities) {
         const map = THEME_MAP[ent]; if (!map) continue;
+        const tdir = map.corr === 1 ? h.score : -h.score;
         for (const sec of map.bad)  { add('sector:' + sec, h.score * 0.4, `Trump on ${map.label}: "${h.title.slice(0, 50)}"`); addSec(sec, h.score * 0.4, 'trump'); }
-        for (const sec of map.good) { addSec(sec, -h.score * 0.35, 'trump'); }
+        for (const sec of map.good) { add('sector:' + sec, tdir * 0.35, `Trump on ${map.label}: "${h.title.slice(0, 50)}"`); addSec(sec, tdir * 0.35, 'trump'); }
       }
     }
 

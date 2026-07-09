@@ -43,6 +43,14 @@ try {
 } catch (e) {
   console.log('[state] fresh start — $' + PAPER_START + ' virtual ledger (load failed: ' + e.message + ')');
 }
+// SELF-HEAL a partial/corrupt state file: Object.assign is shallow, so a saved state
+// missing nested fields (e.g. paper without .positions) would crash every agent that
+// iterates them, forever. Re-seed any missing branch with its default shape.
+state.paper = Object.assign({ balance: PAPER_START, positions: {} }, state.paper);
+state.t212 = Object.assign({ positions: {} }, state.t212);
+if (!Array.isArray(state.history)) state.history = [];
+if (!Array.isArray(state.equityCurve)) state.equityCurve = [];
+state.learn = state.learn || {}; state.blacklist = state.blacklist || {};
 
 let dirty = false;
 let lastHealthy = Date.now();  // track last successful trade/order
