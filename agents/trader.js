@@ -299,12 +299,28 @@ function start(bus) {
     }
     // 🚀 GAP-AND-GO — opened ≥2.5% above yesterday's close WITH positive news behind it
     // and volume confirming: the gap is the market repricing the story; ride the go.
+    // EARNINGS-DAY EXCEPTION (post-earnings-drift evidence): a stock gapping ≥4% on its
+    // own report day keeps drifting — the lane stays open all session, not just the open.
+    const reportedToday = bus.earningsInDays && bus.earningsInDays(sym) === 0;
     if (ev.sigType !== 'SPIKE' && ev.sigType !== 'ORB' &&
-        cl.length <= 45 && (mk.pct24h || 0) >= 2.5 && newsScore > 0.1 && (mk.volSurge || 0) >= 1.5 && stillRising) {
+        (cl.length <= 45 || (reportedToday && (mk.pct24h || 0) >= 4)) &&
+        (mk.pct24h || 0) >= 2.5 && newsScore > 0.1 && (mk.volSurge || 0) >= 1.5 && stillRising) {
       ev.sigType = 'GAP';
-      conf = Math.min(1, conf + 0.20);
-      tvNote += ` · 🚀 gap-and-go +${(mk.pct24h).toFixed(1)}% on news ${(newsScore > 0 ? '+' : '') + newsScore.toFixed(2)}`;
+      conf = Math.min(1, conf + (reportedToday ? 0.24 : 0.20));
+      tvNote += ` · 🚀 gap-and-go +${(mk.pct24h).toFixed(1)}%${reportedToday ? ' (earnings day — drift lane)' : ''} on news ${(newsScore > 0 ? '+' : '') + newsScore.toFixed(2)}`;
     }
+    // 🏁 CLOSE-RUN — documented last-hour momentum: above VWAP, green on the day, still
+    // rising inside the final hour → tends to keep running into the bell.
+    const m2cEarly = minsToClose(sym);
+    if (!/^(SPIKE|ORB|GAP)$/.test(ev.sigType || '') && m2cEarly != null && m2cEarly <= 60 && m2cEarly > 8 &&
+        mk.vwap && mk.price > mk.vwap && (mk.pct24h || 0) > 0.3 && stillRising) {
+      ev.sigType = 'CLOSE_RUN';
+      conf = Math.min(1, conf + 0.15);
+      tvNote += ` · 🏁 close-run (last hour, above VWAP, +${(mk.pct24h).toFixed(1)}% day)`;
+    }
+    // POWER-HOURS BOOST — intraday momentum concentrates in the first 30 min and the
+    // last hour of the session (midday already gets docked separately).
+    if (cl.length <= 30 || (m2cEarly != null && m2cEarly <= 60)) conf = Math.min(1, conf * 1.06);
     // SYSTEM X2 fleet inputs —
     // historian: never fight a century of trend
     const lt = bus.longTerm && bus.longTerm[sym];
@@ -376,6 +392,11 @@ function start(bus) {
       conf = Math.max(0, Math.min(1, conf + qsig * 0.05));
       if (qsig > 0.35) { votes.push('quiver'); tvNote += ` · congress/gov buying +${qsig.toFixed(2)}`; }
     }
+    // 🌊 SECTOR FLOW — leaders in today's hot sectors get a boost + vote; laggards in
+    // cold sectors get docked. Ride the money flow, don't fight it.
+    const flowSig = (bus.flowSignal && bus.flowSignal[sym]) || 0;
+    if (flowSig > 0.2) { conf = Math.min(1, conf + Math.min(0.08, flowSig * 0.08)); votes.push('flow'); tvNote += ` · 🌊 sector leader +${flowSig.toFixed(2)}`; }
+    else if (flowSig < 0) { conf = Math.max(0, conf + flowSig * 0.15); tvNote += ' · 🌊 cold-sector laggard'; }
     // EIGHT COMMODITY DESKS — bounded advisory on the mapped commodity ETCs
     const cd = (bus.commodDeskSignal && bus.commodDeskSignal[sym]) || null;
     if (cd && Math.abs(cd.score) > 0.04) {
@@ -538,10 +559,11 @@ function start(bus) {
       // t212 queue while ticks fire every 2.5s, so without this several entries all
       // size against the SAME balance and over-commit (the July-4th £9,996 incident)
       bus.t212Status.cash = Math.max(0, cash - invest);
-      // REAL money uses a MARKETABLE LIMIT — priced a hair through the spread so it fills
-      // immediately but can never pay more than +0.3% above mid (caps slippage on 16k names).
-      // PRACTICE uses a plain market order. Falls back to market if the venue rejects the limit.
-      const useLimit = prof.name === 'real';
+      // EVERY entry uses a MARKETABLE LIMIT — priced a hair through the spread so it fills
+      // immediately but can never pay more than +0.3% above the quote. Uncapped market
+      // orders were leaking money on entry across 17k thin-to-thick names; capped fills
+      // are strictly better on practice AND real. Falls back to market if the venue rejects.
+      const useLimit = true;
       const limitPx = +(mk.price * 1.003).toFixed(mk.price > 50 ? 2 : mk.price > 1 ? 3 : 5);
       const send = (q) => useLimit ? t212.limitOrder(t212Ticker[sym], q, limitPx) : t212.marketOrder(t212Ticker[sym], q);
       // The whole send/retry sequence is wrapped: a network abort/timeout THROWS rather
@@ -635,9 +657,9 @@ function start(bus) {
       // win is exactly the one that must not be handed back
       const trailGap = peakGain > 0.03 ? 0.003 : 0.005;
       const turnedDown = gain <= peakGain - trailGap || twoRed;
-      // ⚡ momentum entries (SPIKE / opening-range breakout / gap-and-go) all live by
-      // scalper rules: ride the momentum, bank the turn, cut fast, never linger.
-      if (p.sigType === 'SPIKE' || p.sigType === 'ORB' || p.sigType === 'GAP') {
+      // ⚡ momentum entries (SPIKE / opening-range breakout / gap-and-go / close-run) all
+      // live by scalper rules: ride the momentum, bank the turn, cut fast, never linger.
+      if (p.sigType === 'SPIKE' || p.sigType === 'ORB' || p.sigType === 'GAP' || p.sigType === 'CLOSE_RUN') {
         let sWhy = null;
         if (netGain >= 0.012 && turnedDown) sWhy = `⚡ rode to +${(netGain * 100).toFixed(2)}% net, momentum turned — banking`;
         else if (peakGain >= 0.008 && gain <= peakGain - 0.005) sWhy = `⚡ spike fading (peak +${(peakGain * 100).toFixed(1)}% → +${(gain * 100).toFixed(1)}%) — banking`;
