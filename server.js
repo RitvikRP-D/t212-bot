@@ -51,6 +51,8 @@ state.t212 = Object.assign({ positions: {} }, state.t212);
 if (!Array.isArray(state.history)) state.history = [];
 if (!Array.isArray(state.equityCurve)) state.equityCurve = [];
 state.learn = state.learn || {}; state.blacklist = state.blacklist || {};
+// the user's standing target: +£15 from the 2026-07-09 baseline — tracked live on the dashboard
+state.goal = state.goal || { baseline: 97.15, target: 112.15, setAt: '2026-07-09' };
 
 let dirty = false;
 let lastHealthy = Date.now();  // track last successful trade/order
@@ -247,6 +249,11 @@ function snapshot() {
   const commodTop = Object.entries(bus.commod || {}).filter(([, v]) => v.price)
     .sort((a, b) => (b[1].conf || 0) - (a[1].conf || 0)).slice(0, 12)
     .map(([key, v]) => ({ key, price: v.price, pct24h: v.pct24h, rsi: v.rsi, conf: v.conf || 0, etp: v.etp || null, etpName: v.etpName || null }));
+  const equityOut = bus.t212Status?.connected
+    ? (isFinite(bus.t212Status?.total) && bus.t212Status.total > 0
+        ? +bus.t212Status.total.toFixed(2)
+        : +((bus.t212Status?.cash || 0) + openVal).toFixed(2))
+    : +(state.paper.balance).toFixed(2);
   return {
     time: new Date().toLocaleTimeString(), pause: state.pause,
     t212: bus.t212Status, scan: bus.scanStatus, log: bus.logStatus, tv: bus.tvStatus, tva: bus.tvaStatus,
@@ -281,11 +288,8 @@ function snapshot() {
     // T212's own account total is authoritative — free cash + blocked cash + invested
     // at THEIR prices. Local cash+openVal math drifts on stale prices/pending orders
     // (the audit agent kept flagging 8% divergence), so it is only a fallback.
-    equity: bus.t212Status?.connected
-      ? (isFinite(bus.t212Status?.total) && bus.t212Status.total > 0
-          ? +bus.t212Status.total.toFixed(2)
-          : +((bus.t212Status?.cash || 0) + openVal).toFixed(2))
-      : +(state.paper.balance).toFixed(2),
+    equity: equityOut,
+    goal: state.goal ? { ...state.goal, progress: +(equityOut - state.goal.baseline).toFixed(2), met: equityOut >= state.goal.target } : null,
     openCount: positions.length, closedCount: closed.length,
     winRate: closed.length ? Math.round(wins / closed.length * 100) : null,
     universe: bus.universe.length,

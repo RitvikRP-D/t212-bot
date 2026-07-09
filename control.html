@@ -108,6 +108,7 @@
 
   <div class="cards">
     <div class="card"><div class="l">Equity</div><div class="v" id="c-eq">…</div></div>
+    <div class="card"><div class="l">🎯 Goal +£15</div><div class="v" id="c-goal">…</div></div>
     <div class="card"><div class="l">Cash</div><div class="v blue" id="c-cash">…</div></div>
     <div class="card"><div class="l">Realized P&L</div><div class="v" id="c-pnl">…</div></div>
     <div class="card"><div class="l">Open</div><div class="v amber" id="c-open">…</div></div>
@@ -364,6 +365,7 @@ function render(d){
 
   // cards
   $('c-eq').textContent=money(d.equity);
+  if($('c-goal')&&d.goal){const g=d.goal;$('c-goal').textContent=(g.progress>=0?'+':'')+g.progress.toFixed(2)+' / +15.00';$('c-goal').className='v '+cls(g.progress);}
   $('c-cash').textContent=money(d.t212&&d.t212.cash);
   const pnl=Number(d.realized||0); $('c-pnl').textContent=money(pnl); $('c-pnl').className='v '+cls(pnl);
   $('c-open').textContent=(d.openCount||0)+' / '+(d.closedCount||0);

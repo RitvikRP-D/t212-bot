@@ -70,6 +70,7 @@ function start(bus) {
   }
 
   setInterval(evaluate, 5 * 60e3);
+  setTimeout(evaluate, 90e3);   // first pass shortly after boot (a post-21:00 deploy shouldn't wait 5 min)
   console.log('[coach] self-improvement loop armed — grades each day after the close, tunes within hard bounds');
 }
 module.exports = { start };
