@@ -45,21 +45,31 @@ function start(bus) {
     reconcile();
   }
   const CACHE_FILE = require('path').join(__dirname, '..', 'bot-data', 'instruments-cache.json');
+  function adoptUniverse(universe, label) {
+    if (!Array.isArray(universe) || universe.length <= bus.universe.length) return false;
+    bus.universe = universe;
+    for (const u of universe) { t212Ticker[u.y] = u.t212; if (u.gbx) gbxTickers.add(u.t212); }
+    bus.t212Status.mapped = Object.keys(t212Ticker).length;
+    console.log(`[t212] universe loaded from ${label}: ${universe.length} instruments`);
+    return true;
+  }
   function loadFromCache() {
     if (bus.universe.length > 1000) return; // already expanded
+    const fs = require('fs');
+    // 1) volume cache (freshest, survives restarts when the volume is healthy)
     try {
-      const fs = require('fs');
-      if (!fs.existsSync(CACHE_FILE)) return;
-      const raw = JSON.parse(fs.readFileSync(CACHE_FILE, 'utf8'));
-      if (!Array.isArray(raw)) return;
-      const { universe, skipped } = fromInstruments(raw);
-      if (universe.length > bus.universe.length) {
-        bus.universe = universe;
-        for (const u of universe) { t212Ticker[u.y] = u.t212; if (u.gbx) gbxTickers.add(u.t212); }
-        bus.t212Status.mapped = Object.keys(t212Ticker).length;
-        console.log(`[t212] universe loaded from CACHE: ${universe.length} instruments (${skipped} unmappable skipped) — no API wait`);
+      if (fs.existsSync(CACHE_FILE)) {
+        const raw = JSON.parse(fs.readFileSync(CACHE_FILE, 'utf8'));
+        if (Array.isArray(raw) && adoptUniverse(fromInstruments(raw).universe, 'VOLUME CACHE')) return;
       }
-    } catch (e) { console.log('[t212] cache load failed: ' + e.message); }
+    } catch (e) { console.log('[t212] volume cache load failed: ' + e.message); }
+    // 2) BUNDLED SNAPSHOT — ships inside the repo/image, so even a brand-new container
+    // with an empty volume boots with the FULL universe instantly instead of showing the
+    // 244-name fallback for minutes (the "universe is 244" incident). Live refresh follows.
+    try {
+      const snapPath = require('path').join(__dirname, '..', 'data', 'universe-snapshot.json');
+      if (fs.existsSync(snapPath)) adoptUniverse(JSON.parse(fs.readFileSync(snapPath, 'utf8')), 'BUNDLED SNAPSHOT');
+    } catch (e) { console.log('[t212] snapshot load failed: ' + e.message); }
   }
   async function expandUniverse() {
     // always attempt periodic refresh — don't skip based on prior universe size, since mappings can stale/change
