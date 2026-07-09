@@ -269,6 +269,7 @@ function snapshot() {
     trump: bus.trump || null,
     quiver: bus.quiver || null,
     desks: bus.desks || null,
+    flow: bus.flow || null,
     fundStatus: bus.fundStatus || null,
     blacklist: Object.keys(state.blacklist || {}),
     queue: Object.entries(state.queue || {}).map(([sym, q]) => ({ sym, ...q })),
