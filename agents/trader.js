@@ -150,7 +150,7 @@ function start(bus) {
           const sym = rev[pos.ticker];
           if (sym) {
             state.t212.positions[sym] = { t212Ticker: pos.ticker, entry: avgPx, qty: pos.quantity,
-              invested: +(avgPx * pos.quantity).toFixed(2), opened: 'recovered', peak: avgPx,
+              invested: +(avgPx * pos.quantity).toFixed(2), opened: 'recovered', openedAt: Date.now(), peak: avgPx,
               conf: 0, sigType: 'adopted', reason: 'recovered from T212 account after restart' };
             console.log('[t212] adopted existing position ' + pos.ticker);
           }
@@ -530,6 +530,10 @@ function start(bus) {
       // sellInFlight: a SELL is queued/awaiting T212 — re-evaluating the exit would fire
       // a duplicate sell (reconcile can clear pendingFill mid-flight, so it can't guard this)
       if (!p || p.pendingFill || p.sellInFlight) continue;
+      // UNIT-MISMATCH GUARD: if entry and live price disagree by >5×, one of them is in
+      // the wrong currency unit (GBX vs GBP adoption edge). Any exit math on it would book
+      // phantom P&L or fire a false stop — skip and let reconcile resync the entry.
+      if (p.entry && mk.price && (p.entry / mk.price > 5 || mk.price / p.entry > 5)) continue;
       if (p.forceClose) { closePos(sym, ledger, book, p, mk, 'manual close from dashboard'); continue; }
       if (mk.price > p.peak) p.peak = mk.price;
       const gain = (mk.price - p.entry) / p.entry;
@@ -553,7 +557,9 @@ function start(bus) {
       }
       // DEAD-MONEY RECYCLER (practice/high-risk): a position flat for 2h+ is a blocked
       // slot — the whole point is rotating capital into whatever is MOVING right now.
-      if (prof.name === 'practice' && heldMin > 120 && Math.abs(gain) < 0.005) {
+      // requires a REAL openedAt — a missing timestamp defaulted heldMin to 999 and
+      // insta-dumped every re-adopted position on boot (the 2026-07-09 churn incident)
+      if (prof.name === 'practice' && p.openedAt && heldMin > 120 && Math.abs(gain) < 0.005) {
         closePos(sym, ledger, book, p, mk, `dead money — flat ${heldMin.toFixed(0)}m, recycling the slot`);
         continue;
       }

@@ -68,7 +68,7 @@ function nextOpenInfo(){
 // ETCs all enter through the same trader gate.
 const PROFILES = {
   practice: {
-    name: 'practice', perTradeCap: 0.90, sizeBase: 0.20, sizeSlope: 0.70,
+    name: 'practice', perTradeCap: 0.35, sizeBase: 0.15, sizeSlope: 0.40,   // spread the book — churn on one 90% bet is fatal
     maxOpen: 10, minConf: 0.55, minHoldMin: 0, preferGBP: false,
     nonGbpPenalty: 0, minNotionalPerMin: 5000, stopLoss: 0.018, dailyMaxLoss: 0.06,   // 5k/min floor: no unfillable junk
     minNetProfit: 0, dailyProfitTarget: 0.08,

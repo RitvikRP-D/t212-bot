@@ -12,7 +12,9 @@ function start(bus) {
 
   function cycle() {
     if (bus.beat) bus.beat('perf');   // loop alive even before the first closed trade
-    const closed = state.history.filter(h => h.pnl != null && h.action === 'SELL');
+    // capital-rotation ops (dead-money recycling, risk liquidations) are not SIGNAL
+    // outcomes — counting them collapsed the win rate and tripped false cool-offs
+    const closed = state.history.filter(h => h.pnl != null && h.action === 'SELL' && !/dead money|LIQUIDATED/i.test(h.why || ''));
     bus.perf.closed = closed.length;
     if (!closed.length) { bus.perf.updated = new Date().toLocaleTimeString(); return; }
     const wins = closed.filter(h => h.pnl > 0), losses = closed.filter(h => h.pnl <= 0);
