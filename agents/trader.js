@@ -258,6 +258,25 @@ function start(bus) {
       conf = Math.min(1, conf + 0.25);
       tvNote += ` · ⚡ SPIKE +${(spikePct * 100).toFixed(1)}% in 15m on ${(mk.volSurge).toFixed(1)}× volume`;
     }
+    // 🔔 OPENING-RANGE BREAKOUT — classic intraday momentum edge: price clearing the
+    // first-15-minute high on volume, early in the session (closes[] holds only today's
+    // 1-min bars, so bar count ≈ minutes since the open).
+    else if (cl.length >= 20 && cl.length <= 60 && stillRising && (mk.volSurge || 0) >= 1.5) {
+      const orHigh = Math.max(...cl.slice(0, 15));
+      if (mk.price > orHigh * 1.002) {
+        ev.sigType = 'ORB';
+        conf = Math.min(1, conf + 0.18);
+        tvNote += ` · 🔔 opening-range breakout (>15m high on ${(mk.volSurge).toFixed(1)}× vol)`;
+      }
+    }
+    // 🚀 GAP-AND-GO — opened ≥2.5% above yesterday's close WITH positive news behind it
+    // and volume confirming: the gap is the market repricing the story; ride the go.
+    if (ev.sigType !== 'SPIKE' && ev.sigType !== 'ORB' &&
+        cl.length <= 45 && (mk.pct24h || 0) >= 2.5 && newsScore > 0.1 && (mk.volSurge || 0) >= 1.5 && stillRising) {
+      ev.sigType = 'GAP';
+      conf = Math.min(1, conf + 0.20);
+      tvNote += ` · 🚀 gap-and-go +${(mk.pct24h).toFixed(1)}% on news ${(newsScore > 0 ? '+' : '') + newsScore.toFixed(2)}`;
+    }
     // SYSTEM X2 fleet inputs —
     // historian: never fight a century of trend
     const lt = bus.longTerm && bus.longTerm[sym];
@@ -343,7 +362,8 @@ function start(bus) {
     // exempt (volume-confirmed momentum is its own thesis); everything else gets docked
     // hard enough that only genuinely strong setups clear the bar alone.
     const corroborated = votes.some(v => v !== 'signal' && v !== 'volume');
-    if (!corroborated && ev.sigType !== 'SPIKE') { conf *= 0.8; tvNote += ' · ⏸ no news/TV/desk backing'; }
+    const momentumThesis = /^(SPIKE|ORB|GAP)$/.test(ev.sigType || '');   // volume-confirmed momentum is its own thesis
+    if (!corroborated && !momentumThesis) { conf *= 0.8; tvNote += ' · ⏸ no news/TV/desk backing'; }
 
     // ——— ENTRY TIMING (#8) — don't catch a falling knife on reversal setups ———
     const reversalSig = /RSI_OVERSOLD|RSI_DIP|DIP_REVERSAL|BB_BOUNCE/.test(ev.sigType || '');
@@ -557,8 +577,9 @@ function start(bus) {
       const oneRed = cls.length >= 2 && cls[cls.length - 1] < cls[cls.length - 2];
       const twoRed = cls.length >= 3 && oneRed && cls[cls.length - 2] < cls[cls.length - 3];
       const turnedDown = gain <= peakGain - 0.003 || twoRed;   // 0.3% off the peak, or two red bars
-      // ⚡ SPIKE positions live by scalper rules: ride the momentum, bank the turn, cut fast.
-      if (p.sigType === 'SPIKE') {
+      // ⚡ momentum entries (SPIKE / opening-range breakout / gap-and-go) all live by
+      // scalper rules: ride the momentum, bank the turn, cut fast, never linger.
+      if (p.sigType === 'SPIKE' || p.sigType === 'ORB' || p.sigType === 'GAP') {
         let sWhy = null;
         if (netGain >= 0.012 && turnedDown) sWhy = `⚡ rode to +${(netGain * 100).toFixed(2)}% net, momentum turned — banking`;
         else if (peakGain >= 0.008 && gain <= peakGain - 0.005) sWhy = `⚡ spike fading (peak +${(peakGain * 100).toFixed(1)}% → +${(gain * 100).toFixed(1)}%) — banking`;
