@@ -45,12 +45,18 @@ function start(bus) {
     reconcile();
   }
   const CACHE_FILE = require('path').join(__dirname, '..', 'bot-data', 'instruments-cache.json');
+  const inverseSyms = new Set(); // inverse/short ETPs — they RISE when the market falls
   function adoptUniverse(universe, label) {
     if (!Array.isArray(universe) || universe.length <= bus.universe.length) return false;
     bus.universe = universe;
-    for (const u of universe) { t212Ticker[u.y] = u.t212; if (u.gbx) gbxTickers.add(u.t212); }
+    inverseSyms.clear();
+    for (const u of universe) {
+      t212Ticker[u.y] = u.t212;
+      if (u.gbx) gbxTickers.add(u.t212);
+      if (/(-[123]x|\b[123]x short|short daily|inverse|\bbear\b)/i.test(u.name || '')) inverseSyms.add(u.y);
+    }
     bus.t212Status.mapped = Object.keys(t212Ticker).length;
-    console.log(`[t212] universe loaded from ${label}: ${universe.length} instruments`);
+    console.log(`[t212] universe loaded from ${label}: ${universe.length} instruments (${inverseSyms.size} inverse ETPs flagged for the bear lane)`);
     return true;
   }
   function loadFromCache() {
@@ -79,12 +85,10 @@ function start(bus) {
         const { universe, skipped } = fromInstruments(inst.body);
         // only update if we have new/changed data
         if (universe.length > 0 && universe.length !== bus.universe.length) {
-          bus.universe = universe;
+          bus.universe = [];   // force adoptUniverse to accept the refresh
           for (const k of Object.keys(t212Ticker)) delete t212Ticker[k];  // clear in place — t212Ticker is const
           gbxTickers.clear();
-          for (const u of universe) { t212Ticker[u.y] = u.t212; if (u.gbx) gbxTickers.add(u.t212); }
-          console.log(`[t212] universe refreshed to ${universe.length} instruments (${skipped} unmappable skipped)`);
-          bus.t212Status.mapped = Object.keys(t212Ticker).length;
+          adoptUniverse(universe, `LIVE REFRESH (${skipped} unmappable skipped)`);
           // refresh the on-disk cache
           try { require('fs').writeFileSync(CACHE_FILE, JSON.stringify(inst.body)); } catch (e) {}
         }
@@ -259,8 +263,13 @@ function start(bus) {
         reasons: [`📰 news-driven — composite +${newsScore.toFixed(2)} (senti ${senti.toFixed(2)} · brain ${nbSig.toFixed(2)} · correlator ${niSig.toFixed(2)})`] };
     }
     if (!ev) { mk.lastConf = 0; mk.lastWhy = mk.rsi != null ? `no buy setup — RSI ${mk.rsi.toFixed(1)}${mk.rsi > 68 ? ' overbought' : ''}` : 'warming up'; return; }
+    // 🐻 BEAR LANE — inverse ETPs profit from falling markets, so every market-direction
+    // rule inverts for them: bad market news is their tailwind (no news veto), and the
+    // index being weak is their setup. This gives a long-only account red-day offense.
+    const isInverse = inverseSyms.has(sym);
     // NEWS VETO — clearly negative news kills the entry, whatever the chart says.
-    if (newsScore <= -0.30) { mk.lastConf = 0; mk.lastWhy = `⛔ news veto (${newsScore.toFixed(2)}) — not buying into bad news`; return; }
+    // (skipped for inverse ETPs — a red tape is exactly when they work)
+    if (!isInverse && newsScore <= -0.30) { mk.lastConf = 0; mk.lastWhy = `⛔ news veto (${newsScore.toFixed(2)}) — not buying into bad news`; return; }
     // DATA-HEALTH GATE — when the sentinel says the price APIs are failing, entering is
     // trading blind; hold fire until the data source recovers.
     if (bus.sentinelStatus && bus.sentinelStatus.apiHealthy === false) { mk.lastWhy = (mk.lastWhy || '') + ' · ⏸ data source unhealthy'; return; }
@@ -291,8 +300,9 @@ function start(bus) {
       conf = Math.max(0, Math.min(1, conf + tvr.rec * 0.28));   // TV: main decision factor
       tvNote = ` · TradingView says ${tvr.label} (${tvr.rec.toFixed(2)})${tvr.detail ? ': ' + tvr.detail : ''}`;
     }
-    // NEWS: the single biggest confidence weight in the whole assembly (±0.30)
-    if (newsScore !== 0) { conf = Math.max(0, Math.min(1, conf + newsScore * 0.30)); tvNote += ` · 📰 news ${(newsScore > 0 ? '+' : '') + newsScore.toFixed(2)}`; }
+    // NEWS: the single biggest confidence weight in the whole assembly (±0.30).
+    // Inverse ETPs read it MIRRORED — grim market news is their fuel.
+    if (newsScore !== 0) { const nsDir = isInverse ? -newsScore : newsScore; conf = Math.max(0, Math.min(1, conf + nsDir * 0.30)); tvNote += ` · 📰 news ${(newsScore > 0 ? '+' : '') + newsScore.toFixed(2)}${isInverse ? ' (mirrored — inverse ETP)' : ''}`; }
     // ⚡ SPIKE SCALP — a sharp pop on real volume is its own thesis: ride it, bank it fast.
     // 1-min bars: ≥1.8% move over the last 15 bars, on ≥1.8× normal volume, still rising.
     const cl = mk.closes || [];
@@ -343,11 +353,14 @@ function start(bus) {
     // only the gap lane (built for the open, needs news backing) is allowed to pay them.
     if (cl.length <= 5 && ev.sigType !== 'GAP') { mk.lastConf = 0; mk.lastWhy = (mk.lastWhy || '') + ' · ⏸ first minutes — spreads at their widest'; return; }
     // MARKET-TAPE GATE — a US long fights the whole tape when SPY is under its session
-    // VWAP; when the index is above it, longs get a small tailwind.
-    if (venue(sym) === 'US') {
+    // VWAP; when the index is above it, longs get a small tailwind. MIRRORED for inverse
+    // ETPs: a weak index is their green light.
+    if (venue(sym) === 'US' || isInverse) {
       const spy = bus.market['SPY'];
       if (spy && spy.lastTickAt && Date.now() - spy.lastTickAt < 10 * 60e3 && spy.vwap && spy.price) {
-        if (spy.price < spy.vwap) { conf *= 0.88; tvNote += ' · SPY under VWAP (tape against longs)'; }
+        const tapeDown = spy.price < spy.vwap;
+        if (isInverse) { if (tapeDown) { conf = Math.min(1, conf * 1.08); tvNote += ' · 🐻 tape falling — inverse tailwind'; } else conf *= 0.85; }
+        else if (tapeDown) { conf *= 0.88; tvNote += ' · SPY under VWAP (tape against longs)'; }
         else conf = Math.min(1, conf * 1.03);
       }
     }
