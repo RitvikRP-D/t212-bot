@@ -217,16 +217,36 @@ function start(bus) {
   async function tryEnter(sym, mk) {
     if (state.blacklist && state.blacklist[sym]) { mk.lastConf = 0; mk.lastWhy = 'blacklisted from dashboard'; return; }
     const senti = sentiFor(sym);
-    const ev = evaluate(mk, senti, bus.news.fng ? bus.news.fng.value : null, 1);
+    // ——— NEWS COMPOSITE — raw headline sentiment + news-brain interpretation + the
+    // headline→stock correlator, fused into ONE score. THE LOUDEST VOICE IN THE ROOM:
+    // it can originate a trade on its own, it carries the biggest confidence weight,
+    // and strongly negative news vetoes any entry regardless of the chart.
+    const nbSig = (bus.newsBridge && bus.newsBridge.signal && bus.newsBridge.signal[sym]) || 0;
+    const niSig = (bus.newsImpact && bus.newsImpact[sym]) || 0;
+    const newsScore = Math.max(-1, Math.min(1, senti * 0.4 + nbSig * 0.5 + niSig * 0.6));
+    let ev = evaluate(mk, senti, bus.news.fng ? bus.news.fng.value : null, 1);
+    // NEWS-DRIVEN ENTRY: strong positive news IS a thesis — no technical setup required.
+    if (!ev && newsScore >= 0.45 && mk.price != null && mk.rsi != null && mk.rsi < 72) {
+      const clsN = mk.closes || [];
+      const risingN = clsN.length >= 2 && clsN[clsN.length - 1] >= clsN[clsN.length - 2];
+      if (risingN) ev = { conf: Math.min(0.75, 0.5 + newsScore * 0.3), sigType: 'NEWS',
+        reasons: [`📰 news-driven — composite +${newsScore.toFixed(2)} (senti ${senti.toFixed(2)} · brain ${nbSig.toFixed(2)} · correlator ${niSig.toFixed(2)})`] };
+    }
     if (!ev) { mk.lastConf = 0; mk.lastWhy = mk.rsi != null ? `no buy setup — RSI ${mk.rsi.toFixed(1)}${mk.rsi > 68 ? ' overbought' : ''}` : 'warming up'; return; }
+    // NEWS VETO — clearly negative news kills the entry, whatever the chart says.
+    if (newsScore <= -0.30) { mk.lastConf = 0; mk.lastWhy = `⛔ news veto (${newsScore.toFixed(2)}) — not buying into bad news`; return; }
     const lm = learnMul(ev.sigType, sym);
     let conf = Math.max(0, Math.min(1, ev.conf * lm));
     let tvNote = '';
     const tvr = bus.tvRatings && bus.tvRatings[sym];
     if (tvr && Date.now() - tvr.at < 30 * 60e3) {
-      conf = Math.max(0, Math.min(1, conf + tvr.rec * 0.22));   // TV is a first-class voice, not a whisper
+      // TV VETO — a fresh SELL-side rating from 122 indicators blocks the entry outright.
+      if (tvr.rec <= -0.35) { mk.lastConf = 0; mk.lastWhy = `⛔ TradingView veto — ${tvr.label} (${tvr.rec.toFixed(2)})`; return; }
+      conf = Math.max(0, Math.min(1, conf + tvr.rec * 0.28));   // TV: main decision factor
       tvNote = ` · TradingView says ${tvr.label} (${tvr.rec.toFixed(2)})${tvr.detail ? ': ' + tvr.detail : ''}`;
     }
+    // NEWS: the single biggest confidence weight in the whole assembly (±0.30)
+    if (newsScore !== 0) { conf = Math.max(0, Math.min(1, conf + newsScore * 0.30)); tvNote += ` · 📰 news ${(newsScore > 0 ? '+' : '') + newsScore.toFixed(2)}`; }
     // ⚡ SPIKE SCALP — a sharp pop on real volume is its own thesis: ride it, bank it fast.
     // 1-min bars: ≥1.8% move over the last 15 bars, on ≥1.8× normal volume, still rising.
     const cl = mk.closes || [];
@@ -277,25 +297,11 @@ function start(bus) {
     if (senti > 0.2) votes.push('news');
     if (bus.news.congressBoost && bus.news.congressBoost[sym.split('.')[0]] > 0) votes.push('congress');
     if ((mk.volSurge || 0) > 1.8) votes.push('volume');
-    // NEWS BRAIN vote + bounded confidence nudge (agents 🅐🅑🅒): interpreted, history-grounded
-    // news lean. Adds a consensus vote when clearly positive, docks conf when clearly negative.
-    if (bus.newsBridge && bus.newsBridge.signal) {
-      const nb = bus.newsBridge.signal[sym];
-      if (nb != null) {
-        conf = Math.max(0, Math.min(1, conf + Math.max(-0.08, Math.min(0.08, nb * 0.08))));
-        if (bus.newsBridge.vote(sym)) { votes.push('newsbrain'); tvNote += ` · news-brain +${nb.toFixed(2)}`; }
-        else if (nb < -0.4) tvNote += ` · news-brain ${nb.toFixed(2)} (caution)`;
-      }
-    }
-    // NEWS CORRELATOR (agent 🅓): per-headline impact already cross-checked vs the
-    // TradingView chart. A clearly positive, chart-agreeing read adds a vote + small
-    // conf bump; a strongly negative one docks conf. Bounded — advisory, never override.
-    if (bus.newsImpact && bus.newsImpact[sym] != null) {
-      const ni = bus.newsImpact[sym];
-      conf = Math.max(0, Math.min(1, conf + Math.max(-0.07, Math.min(0.07, ni * 0.07))));
-      if (ni > 0.3) { votes.push('news-correlate'); tvNote += ` · news→stock +${ni.toFixed(2)}`; }
-      else if (ni < -0.35) tvNote += ` · news→stock ${ni.toFixed(2)} (headwind)`;
-    }
+    // NEWS BRAIN + NEWS CORRELATOR votes — their confidence weight now flows through the
+    // fused newsScore above (±0.30, the biggest single factor); here they only add their
+    // independent consensus votes so the vote count reflects who backs the entry.
+    if (bus.newsBridge && bus.newsBridge.vote && bus.newsBridge.vote(sym)) { votes.push('newsbrain'); tvNote += ` · news-brain +${nbSig.toFixed(2)}`; }
+    if (niSig > 0.3) { votes.push('news-correlate'); tvNote += ` · news→stock +${niSig.toFixed(2)}`; }
     // INSTITUTIONAL DESKS (agents 🏦): Goldman-screener quality + McKinsey macro sector
     // tilt, bounded advisory fold-in — more information, never a constraint.
     if (bus.desks) {
