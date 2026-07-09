@@ -5,7 +5,7 @@
 const t212 = require('../lib/t212');
 const { evaluate } = require('../lib/indicators');
 const { fromInstruments, fallback } = require('../lib/universe');
-const { TRADER_TICK_MS, T212_MIN_ORDER, AUTH_RETRY_MS, MAX_OPEN, marketOpen, frictionPct, minsToClose, VARIANT } = require('../config');
+const { TRADER_TICK_MS, T212_MIN_ORDER, AUTH_RETRY_MS, MAX_OPEN, marketOpen, frictionPct, minsToClose, VARIANT, venue } = require('../config');
 const { sectorOf, countryOf } = require('../lib/fleet');
 
 function now() { return new Date().toLocaleTimeString(); }
@@ -226,15 +226,35 @@ function start(bus) {
     const newsScore = Math.max(-1, Math.min(1, senti * 0.4 + nbSig * 0.5 + niSig * 0.6));
     let ev = evaluate(mk, senti, bus.news.fng ? bus.news.fng.value : null, 1);
     // NEWS-DRIVEN ENTRY: strong positive news IS a thesis — no technical setup required.
-    if (!ev && newsScore >= 0.45 && mk.price != null && mk.rsi != null && mk.rsi < 72) {
+    // Gate 0.35 (not 0.45 — the composite is a product of three sub-1 signals, 0.45 was
+    // nearly unreachable) and flat-tolerant (a name digesting news sideways still qualifies;
+    // only an actively falling tape disqualifies).
+    if (!ev && newsScore >= 0.35 && mk.price != null && mk.rsi != null && mk.rsi < 72) {
       const clsN = mk.closes || [];
-      const risingN = clsN.length >= 2 && clsN[clsN.length - 1] >= clsN[clsN.length - 2];
-      if (risingN) ev = { conf: Math.min(0.75, 0.5 + newsScore * 0.3), sigType: 'NEWS',
+      const notFalling = clsN.length >= 2 && clsN[clsN.length - 1] >= clsN[clsN.length - 2] * 0.999;
+      if (notFalling) ev = { conf: Math.min(0.78, 0.5 + newsScore * 0.35), sigType: 'NEWS',
         reasons: [`📰 news-driven — composite +${newsScore.toFixed(2)} (senti ${senti.toFixed(2)} · brain ${nbSig.toFixed(2)} · correlator ${niSig.toFixed(2)})`] };
     }
     if (!ev) { mk.lastConf = 0; mk.lastWhy = mk.rsi != null ? `no buy setup — RSI ${mk.rsi.toFixed(1)}${mk.rsi > 68 ? ' overbought' : ''}` : 'warming up'; return; }
     // NEWS VETO — clearly negative news kills the entry, whatever the chart says.
     if (newsScore <= -0.30) { mk.lastConf = 0; mk.lastWhy = `⛔ news veto (${newsScore.toFixed(2)}) — not buying into bad news`; return; }
+    // STALE-QUOTE GUARD — the full scan pass takes ~40 min; entering on a price that old
+    // is trading blind. Only fresh quotes (≤2 min) may trade; hot-lane names (holdings,
+    // news, TV, movers) refresh every few seconds so real opportunities stay eligible.
+    if (!mk.lastTickAt || Date.now() - mk.lastTickAt > 120e3) { mk.lastWhy = (mk.lastWhy || '') + ' · ⏸ quote stale — waiting for fresh scan'; return; }
+    // RE-ENTRY COOLDOWN — 20 min after closing a name before buying it again (a brand-new
+    // volume spike overrides). Stops the same-symbol churn that just pays the spread twice.
+    state.lastClosed = state.lastClosed || {};
+    if (state.lastClosed[sym] && Date.now() - state.lastClosed[sym] < 20 * 60e3 && !(mk.volSurge >= 1.8)) {
+      mk.lastConf = 0; mk.lastWhy = '⏸ just traded this — 20m cooldown'; return;
+    }
+    // AUTO DAY-BLACKLIST — two losing trades in one symbol today means the read is wrong
+    // there; stop donating spread to it until tomorrow.
+    if (state.autoBlack && state.autoBlack[sym] === new Date().toDateString()) {
+      mk.lastConf = 0; mk.lastWhy = '⛔ 2 losses here today — benched until tomorrow'; return;
+    }
+    // US MICRO-CAP JUNK FILTER — sub-$2 names churn on spread alone.
+    if (venue(sym) === 'US' && mk.price < 2) { mk.lastConf = 0; mk.lastWhy = '⛔ sub-$2 micro-cap — spread junk'; return; }
     const lm = learnMul(ev.sigType, sym);
     let conf = Math.max(0, Math.min(1, ev.conf * lm));
     let tvNote = '';
@@ -369,6 +389,17 @@ function start(bus) {
     const reversalSig = /RSI_OVERSOLD|RSI_DIP|DIP_REVERSAL|BB_BOUNCE/.test(ev.sigType || '');
     const turningUp = cl && cl.length >= 2 && cl[cl.length - 1] >= cl[cl.length - 2];
     if (reversalSig && !turningUp) conf *= 0.85;   // softened: no longer hard-blocks on 'real' profile
+    // BELOW-VWAP DOCK — longs below the session VWAP fight the intraday tape; reversal
+    // setups and volume spikes are exempt (buying below VWAP is their whole point).
+    if (!reversalSig && !momentumThesis && mk.vwap && mk.price < mk.vwap) { conf *= 0.88; tvNote += ' · below VWAP'; }
+    // MIDDAY-CHOP DOCK — the 2-4 hours before the close-run are the lowest-signal stretch
+    // of the session; demand a touch more edge there.
+    const m2c = minsToClose(sym);
+    if (m2c != null && m2c > 160 && m2c < 260) { conf *= 0.93; tvNote += ' · midday chop'; }
+    // SOFT TILT THROTTLE — five signal-trades in a row summing negative = the read is off;
+    // demand +0.05 more conf until the tape proves otherwise. Lighter than perf cool-off.
+    const recent5 = state.history.filter(h => h.action === 'SELL' && h.pnl != null && !/dead money|LIQUIDATED/i.test(h.why || '')).slice(0, 5);
+    const tilting = recent5.length === 5 && recent5.reduce((a, h) => a + h.pnl, 0) < 0;
 
     // ——— SIGNAL TIME-DECAY (#9) — a setup that's been live a while without triggering is stale ———
     if (!mk._sig || mk._sig.type !== ev.sigType) mk._sig = { type: ev.sigType, at: Date.now() };
@@ -406,14 +437,16 @@ function start(bus) {
     // EVERY instrument on T212 is exchange-listed (crypto ETPs & commodity ETCs trade on
     // LSE/Xetra too) — so NOTHING trades on a closed venue. One rule for all: venue must be
     // open by the clock. This is the hard guarantee against the holiday-order trap.
-    const minConf = prof.minConf + (recovering ? 0.10 : 0);   // recovery mode demands a bigger edge
+    const minConf = prof.minConf + (recovering ? 0.10 : 0) + (tilting ? 0.05 : 0);   // recovery/tilt demand a bigger edge
     if (state.pause || conf < minConf || !marketOpen(sym) || openCount() >= prof.maxOpen) return;
     if (votes.length < (prof.consensusMin || 1)) { mk.lastWhy = (mk.lastWhy || '') + ` · ⏸ only ${votes.length} agent vote${votes.length === 1 ? '' : 's'} (need ${prof.consensusMin})`; return; }
     if (bus.perfBlocked && bus.perfBlocked()) { mk.lastWhy = (mk.lastWhy || '') + ' · ⏸ performance cool-off'; return; }
     if (bus.riskGate && !bus.riskGate.canEnter()) return; // RISK GUARDIAN gate
-    // LIQUIDITY GATE (real money): skip thin names whose fills would be eaten by spread.
-    if (prof.minNotionalPerMin && (mk.notionalPerMin == null || mk.notionalPerMin < prof.minNotionalPerMin)) {
-      mk.lastWhy = (mk.lastWhy || '') + ' · ⏸ too illiquid for real money';
+    // LIQUIDITY GATE — venue-aware: the US tape is so deep that 5k/min still admits
+    // micro-cap junk; demand 20k/min there. Other venues keep the profile floor.
+    const liqFloor = venue(sym) === 'US' ? Math.max(20000, prof.minNotionalPerMin || 0) : prof.minNotionalPerMin;
+    if (liqFloor && (mk.notionalPerMin == null || mk.notionalPerMin < liqFloor)) {
+      mk.lastWhy = (mk.lastWhy || '') + ' · ⏸ too illiquid to trade cleanly';
       return;
     }
     // FEE-REACH GATE (real money): if the name is too calm to plausibly move past the
@@ -468,6 +501,15 @@ function start(bus) {
     if (t212.connected() && t212Ticker[sym]) {
       if (state.t212.positions[sym]) return;
       const cash = bus.t212Status.cash || 0;
+      // POWDER FLOOR — never deploy the last 15% of the account. Yesterday 18 positions
+      // ate 98% of cash and the bot sat PARALYZED, unable to take a single fresh signal.
+      // Cash on hand IS the ability to catch the next spike.
+      const eqNow = (bus.t212Status.total && isFinite(bus.t212Status.total)) ? bus.t212Status.total : 100;
+      if (cash < eqNow * 0.15) { mk.lastWhy = (mk.lastWhy || '') + ' · ⏸ keeping 15% powder for the next spike'; return; }
+      // DEAD-LETTER COOLDOWN — 2+ rejected orders on a ticker in the past hour means the
+      // venue/instrument is rejecting us; stop feeding the order queue with retries.
+      const dlCount = (bus.deadLetter || []).filter(d => d.sym === sym && Date.now() - (d.at || 0) < 3600e3).length;
+      if (dlCount >= 2) { mk.lastWhy = (mk.lastWhy || '') + ' · ⏸ orders rejected twice this hour'; return; }
       // #new②: VOLATILITY-ADJUSTED SIZING — scale position size inverse to realized vol
       let volMul = 1;
       if (prof.volAdjustedSizing && bus.regime && bus.regime.volRatio > 0) {
@@ -576,7 +618,10 @@ function start(bus) {
       const cls = mk.closes || [];
       const oneRed = cls.length >= 2 && cls[cls.length - 1] < cls[cls.length - 2];
       const twoRed = cls.length >= 3 && oneRed && cls[cls.length - 2] < cls[cls.length - 3];
-      const turnedDown = gain <= peakGain - 0.005 || twoRed;   // 0.5% off the peak, or two red bars — let runners breathe
+      // runners breathe 0.5% — but past +3% the trail snaps tight to 0.3%: a rare big
+      // win is exactly the one that must not be handed back
+      const trailGap = peakGain > 0.03 ? 0.003 : 0.005;
+      const turnedDown = gain <= peakGain - trailGap || twoRed;
       // ⚡ momentum entries (SPIKE / opening-range breakout / gap-and-go) all live by
       // scalper rules: ride the momentum, bank the turn, cut fast, never linger.
       if (p.sigType === 'SPIKE' || p.sigType === 'ORB' || p.sigType === 'GAP') {
@@ -672,6 +717,15 @@ function start(bus) {
     }
     state.realized += pnl;
     learnRecord(p.sigType, sym, pnl);
+    // re-entry cooldown stamp + auto day-blacklist bookkeeping (2 real losses → benched today)
+    (state.lastClosed = state.lastClosed || {})[sym] = Date.now();
+    if (pnl < -0.05) {
+      const today = new Date().toDateString();
+      state.dayLosses = state.dayLosses || {};
+      const k = sym + '|' + today;
+      state.dayLosses[k] = (state.dayLosses[k] || 0) + 1;
+      if (state.dayLosses[k] >= 2) { (state.autoBlack = state.autoBlack || {})[sym] = today; console.log(`[trader] ${sym} benched for today — 2 losing trades`); }
+    }
     pushHist({ t: now(), sym, ledger, action: 'SELL', price: mk.price, qty: p.qty, pnl: +pnl.toFixed(2), why });
     console.log(`[trade] ${ledger} SELL ${sym} pnl=${pnl.toFixed(2)}`);
     bus.markDirty();

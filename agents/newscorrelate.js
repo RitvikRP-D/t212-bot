@@ -143,6 +143,11 @@ function start(bus) {
 
     // merge fresh into the rolling list, drop expired, cap; newest-strongest first
     rolling = [...out, ...rolling].filter(c => (now - c.at) < HEADLINE_TTL).slice(0, 400);
+    // NEWS→SCANNER BRIDGE: a name in the news RIGHT NOW must get fresh prices RIGHT NOW —
+    // the full scan pass takes ~40 min, far too slow for the trader to act on a headline.
+    bus.hotExtra = bus.hotExtra || [];
+    for (const c of out) if (Math.abs(c.strength) >= 0.3 && !bus.hotExtra.some(x => x.sym === c.sym))
+      bus.hotExtra.push({ sym: c.sym, at: now });
 
     // per-symbol live impact = mean strength across the rolling window
     const acc = {};

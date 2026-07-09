@@ -78,8 +78,20 @@ function start(bus) {
     const extra = (bus.hotExtra || []).filter(x => Date.now() - x.at < 15 * 60e3).map(x => x.sym);
     if (bus.hotExtra && extra.length !== bus.hotExtra.length) bus.hotExtra = bus.hotExtra.filter(x => Date.now() - x.at < 15 * 60e3);
     const hot = [...new Set([...holdings, ...extra, ...(bus.tvHot || []), ...open.filter(s => (bus.market[s]?.lastConf || 0) >= 0.15)])].filter(marketOpen);
-    if (slot % HOT_EVERY === 0 && hot.length) fetchSym(hot[hotIdx++ % hot.length]);
-    else fetchSym(open[fullIdx++ % open.length]);
+    if (slot % HOT_EVERY === 0 && hot.length) { fetchSym(hot[hotIdx++ % hot.length]); return; }
+    // FULL-PASS LANE with junk deprioritization: a full rotation over ~7k open names takes
+    // ~40 min, so every wasted slot matters. Names already known to be illiquid junk
+    // (thin volume or sub-$2) only get 1 of every 3 of their turns — tripling the refresh
+    // rate of everything actually tradeable.
+    for (let tries = 0; tries < 8; tries++) {
+      const sym = open[fullIdx++ % open.length];
+      const known = bus.market[sym];
+      const junk = known && ((known.notionalPerMin != null && known.notionalPerMin < 3000) || (known.price != null && known.price < 2 && !sym.includes('.')));
+      if (junk && fullIdx % 3 !== 0) continue;
+      fetchSym(sym);
+      return;
+    }
+    fetchSym(open[fullIdx++ % open.length]);
   }, SCAN_MS);
   console.log('[scanner] started');
 }

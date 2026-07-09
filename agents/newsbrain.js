@@ -100,6 +100,12 @@ function start(bus) {
       .sort((a, b) => Math.abs(b[1]) - Math.abs(a[1])).slice(0, 25)
       .map(([sym, b]) => ({ sym, bias: b, dir: b > 0.15 ? 'BULLISH' : b < -0.15 ? 'BEARISH' : 'neutral', why: (finalRat[sym] || [])[0] || '' }));
 
+    // NEWS→SCANNER BRIDGE: bullish brain calls get pushed to the scanner's priority lane
+    // so their prices are fresh enough for the trader to actually act on the news.
+    bus.hotExtra = bus.hotExtra || [];
+    for (const t of top) if (t.bias > 0.25 && !bus.hotExtra.some(x => x.sym === t.sym))
+      bus.hotExtra.push({ sym: t.sym, at: Date.now() });
+
     // actionable calls — strongest leans that also have a chart or history behind them
     const calls = top.filter(t => Math.abs(t.bias) > 0.25).slice(0, 12).map(t => {
       const tv = bus.tvRatings && bus.tvRatings[t.sym];
