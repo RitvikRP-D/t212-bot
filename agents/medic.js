@@ -36,6 +36,7 @@ function start(bus) {
     { name: 'allocator',  val: () => bus.allocStatus && bus.allocStatus.checked, graceMin: 10 },
     { name: 'marketmap',  val: () => bus.marketMap && bus.marketMap.updated, graceMin: 10 },
     { name: 'flow',       val: () => bus.flow && bus.flow.updated, graceMin: 10 },
+    { name: 'coach',      val: () => bus.coachStatus && bus.coachStatus.lastRun, graceMin: 26 * 60 },
     { name: 'sentinel',   val: () => bus.sentinelStatus && bus.sentinelStatus.checked, graceMin: 10 },
   ];
 

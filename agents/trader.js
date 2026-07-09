@@ -309,7 +309,8 @@ function start(bus) {
     const base15 = cl.length >= 16 ? cl[cl.length - 16] : null;
     const spikePct = base15 ? (mk.price - base15) / base15 : 0;
     const stillRising = cl.length >= 2 && cl[cl.length - 1] >= cl[cl.length - 2];
-    if (spikePct >= 0.018 && (mk.volSurge || 0) >= 1.8 && stillRising) {
+    const tune = (state.coach && state.coach.tuned) || {};   // 🎓 coach-tuned parameters (hard-bounded)
+    if (spikePct >= 0.018 && (mk.volSurge || 0) >= (tune.spikeVol || 1.8) && stillRising) {
       ev.sigType = 'SPIKE';
       conf = Math.min(1, conf + 0.25);
       tvNote += ` · ⚡ SPIKE +${(spikePct * 100).toFixed(1)}% in 15m on ${(mk.volSurge).toFixed(1)}× volume`;
@@ -711,9 +712,10 @@ function start(bus) {
       const cls = mk.closes || [];
       const oneRed = cls.length >= 2 && cls[cls.length - 1] < cls[cls.length - 2];
       const twoRed = cls.length >= 3 && oneRed && cls[cls.length - 2] < cls[cls.length - 3];
-      // runners breathe 0.5% — but past +3% the trail snaps tight to 0.3%: a rare big
-      // win is exactly the one that must not be handed back
-      const trailGap = peakGain > 0.03 ? 0.003 : 0.005;
+      // runners breathe (coach-tunable) — but past +3% the trail snaps tight to 0.3%:
+      // a rare big win is exactly the one that must not be handed back
+      const tuneX = (state.coach && state.coach.tuned) || {};
+      const trailGap = peakGain > 0.03 ? 0.003 : (tuneX.trailGap || 0.005);
       const turnedDown = gain <= peakGain - trailGap || twoRed;
       // ⚡ momentum entries (SPIKE / opening-range breakout / gap-and-go / close-run) all
       // live by scalper rules: ride the momentum, bank the turn, cut fast, never linger.
@@ -728,8 +730,9 @@ function start(bus) {
       // MOMENTUM-TRAIL BANK: past +1% net the winner is NOT capped — as long as it keeps
       // climbing we hold, and the moment it turns down (0.3% off the peak or two straight
       // red bars) the profit is banked and the cash rotates into the next mover.
-      if (prof.quickTake && matured && netGain >= prof.quickTake && turnedDown) {
-        closePos(sym, ledger, book, p, mk, `💰 rode past +${(prof.quickTake * 100).toFixed(0)}% to +${(netGain * 100).toFixed(2)}% net, turned down — banking & rotating`);
+      const qt = tuneX.quickTake || prof.quickTake;
+      if (qt && matured && netGain >= qt && turnedDown) {
+        closePos(sym, ledger, book, p, mk, `💰 rode past +${(qt * 100).toFixed(1)}% to +${(netGain * 100).toFixed(2)}% net, turned down — banking & rotating`);
         continue;
       }
       // DEAD-MONEY RECYCLER (practice/high-risk): a position flat for 2h+ is a blocked

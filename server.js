@@ -204,6 +204,7 @@ require('./agents/trader').start(bus);      // ③ the trader (T212 practice ord
 require('./agents/perf').start(bus);        // ㉒ performance monitor + per-agent scorecard
 require('./agents/auditor').start(bus);     // ㉓ execution auditor + integrity watch
 require('./agents/flow').start(bus);        // 🌊 sector flow & relative strength — where today's money is going
+require('./agents/coach').start(bus);       // 🎓 self-improvement loop — grades the day, writes lessons, tunes within bounds
 require('./agents/heartbeat').start(bus);   // ㉔ fleet liveness monitor (critical-agent alerts → bus.fleetProbe)
 require('./agents/fleet').start(bus);       // 🖥 live per-agent board — every agent's real-time activity → bus.fleet
 require('./agents/allocator').start(bus);   // ⑰ overnight order queue → fires at the bell
@@ -270,6 +271,7 @@ function snapshot() {
     quiver: bus.quiver || null,
     desks: bus.desks || null,
     flow: bus.flow || null,
+    coach: state.coach ? { lastRun: state.coach.lastRun, tuned: state.coach.tuned, lessons: (state.coach.lessons || []).slice(0, 12) } : null,
     fundStatus: bus.fundStatus || null,
     blacklist: Object.keys(state.blacklist || {}),
     queue: Object.entries(state.queue || {}).map(([sym, q]) => ({ sym, ...q })),
