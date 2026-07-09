@@ -70,7 +70,7 @@ const PROFILES = {
   practice: {
     name: 'practice', perTradeCap: 0.90, sizeBase: 0.20, sizeSlope: 0.70,
     maxOpen: 10, minConf: 0.55, minHoldMin: 0, preferGBP: false,
-    nonGbpPenalty: 0, minNotionalPerMin: 0, stopLoss: 0.018, dailyMaxLoss: 0.06,
+    nonGbpPenalty: 0, minNotionalPerMin: 5000, stopLoss: 0.018, dailyMaxLoss: 0.06,   // 5k/min floor: no unfillable junk
     minNetProfit: 0, dailyProfitTarget: 0.08,
     consensusMin: 1, sectorCap: 1.0, countryCap: 1.0, ladder: false,
     recoveryTrigger: 0.06, overnightHold: true,   // #1 fix: enable overnight hold on practice too
@@ -132,10 +132,10 @@ function frictionPct(sym, profile, mk) {
 // pot (< £2,000) gets the conservative profile automatically. So a real £100 account
 // is protected the moment it connects, with zero extra configuration.
 function activeProfile(equity, isLive) {
+  if (isLive) return PROFILES.real;   // REAL MONEY is always conservative — no env override can change that
   const forced = (process.env.TRADING_PROFILE || 'auto').toLowerCase();
   if (forced === 'real') return PROFILES.real;
   if (forced === 'practice') return PROFILES.practice;
-  if (isLive) return PROFILES.real;
   if (equity != null && isFinite(equity) && equity < 2000) return PROFILES.real;
   return PROFILES.practice;
 }
@@ -146,8 +146,8 @@ module.exports = {
   PROFILES, activeProfile, frictionPct, VARIANT,
   PORT: 3100,
   SCAN_MS: 350,            // one Yahoo fetch per 350ms, rotating open-market symbols
-  HOT_EVERY: 3,            // every 3rd scan slot goes to the hot list (holdings + high-confidence)
-  TRADER_TICK_MS: 2500,
+  HOT_EVERY: 2,            // every 2nd scan slot goes to the hot list — holdings/spikes refresh faster
+  TRADER_TICK_MS: 1500,    // evaluate the whole board every 1.5s (was 2.5) — faster spike reaction
   TV_MS: 25000,            // TradingView analyst: one market scanned per 25s, 8 markets rotating
   LOGGER_MS: 60000,
   NEWS_MS: 90000,

@@ -224,8 +224,19 @@ function start(bus) {
     let tvNote = '';
     const tvr = bus.tvRatings && bus.tvRatings[sym];
     if (tvr && Date.now() - tvr.at < 30 * 60e3) {
-      conf = Math.max(0, Math.min(1, conf + tvr.rec * 0.15));
+      conf = Math.max(0, Math.min(1, conf + tvr.rec * 0.22));   // TV is a first-class voice, not a whisper
       tvNote = ` · TradingView says ${tvr.label} (${tvr.rec.toFixed(2)})${tvr.detail ? ': ' + tvr.detail : ''}`;
+    }
+    // ⚡ SPIKE SCALP — a sharp pop on real volume is its own thesis: ride it, bank it fast.
+    // 1-min bars: ≥1.8% move over the last 15 bars, on ≥1.8× normal volume, still rising.
+    const cl = mk.closes || [];
+    const base15 = cl.length >= 16 ? cl[cl.length - 16] : null;
+    const spikePct = base15 ? (mk.price - base15) / base15 : 0;
+    const stillRising = cl.length >= 2 && cl[cl.length - 1] >= cl[cl.length - 2];
+    if (spikePct >= 0.018 && (mk.volSurge || 0) >= 1.8 && stillRising) {
+      ev.sigType = 'SPIKE';
+      conf = Math.min(1, conf + 0.25);
+      tvNote += ` · ⚡ SPIKE +${(spikePct * 100).toFixed(1)}% in 15m on ${(mk.volSurge).toFixed(1)}× volume`;
     }
     // SYSTEM X2 fleet inputs —
     // historian: never fight a century of trend
@@ -321,9 +332,15 @@ function start(bus) {
     }
     mk.lastVotes = votes;
 
+    // ——— BULLSHIT-COMPANY FILTER — a pure technical blip on a name with ZERO news, ZERO
+    // TradingView backing and ZERO desk interest is how junk enters the book. Spikes are
+    // exempt (volume-confirmed momentum is its own thesis); everything else gets docked
+    // hard enough that only genuinely strong setups clear the bar alone.
+    const corroborated = votes.some(v => v !== 'signal' && v !== 'volume');
+    if (!corroborated && ev.sigType !== 'SPIKE') { conf *= 0.8; tvNote += ' · ⏸ no news/TV/desk backing'; }
+
     // ——— ENTRY TIMING (#8) — don't catch a falling knife on reversal setups ———
     const reversalSig = /RSI_OVERSOLD|RSI_DIP|DIP_REVERSAL|BB_BOUNCE/.test(ev.sigType || '');
-    const cl = mk.closes;
     const turningUp = cl && cl.length >= 2 && cl[cl.length - 1] >= cl[cl.length - 2];
     if (reversalSig && !turningUp) conf *= 0.85;   // softened: no longer hard-blocks on 'real' profile
 
@@ -525,6 +542,21 @@ function start(bus) {
       const friction = frictionPct(sym, prof, mk);
       const tpFloor = friction + (prof.minNetProfit || 0);  // don't bank a "profit" that fees would eat
       const netGain = gain - friction;                      // what you actually keep
+      // ⚡ SPIKE positions live by scalper rules: bank fast, cut fast, never linger.
+      if (p.sigType === 'SPIKE') {
+        let sWhy = null;
+        if (netGain >= 0.02) sWhy = `⚡ scalp target +${(netGain * 100).toFixed(2)}% net — banking`;
+        else if (peakGain >= 0.012 && gain <= peakGain - 0.008) sWhy = `⚡ spike fading (peak +${(peakGain * 100).toFixed(1)}% → +${(gain * 100).toFixed(1)}%) — banking`;
+        else if (gain <= -0.012) sWhy = `⚡ spike failed ${(gain * 100).toFixed(1)}% — cutting fast`;
+        else if (heldMin > 45 && netGain < 0.004) sWhy = `⚡ spike stalled ${heldMin.toFixed(0)}m — freeing the slot`;
+        if (sWhy) { closePos(sym, ledger, book, p, mk, sWhy); continue; }
+      }
+      // DEAD-MONEY RECYCLER (practice/high-risk): a position flat for 2h+ is a blocked
+      // slot — the whole point is rotating capital into whatever is MOVING right now.
+      if (prof.name === 'practice' && heldMin > 120 && Math.abs(gain) < 0.005) {
+        closePos(sym, ledger, book, p, mk, `dead money — flat ${heldMin.toFixed(0)}m, recycling the slot`);
+        continue;
+      }
       const edx = (prof.name === 'real' && bus.earningsInDays) ? bus.earningsInDays(sym) : null;  // days to earnings
       const rDist = Math.min(0.04, Math.max(0.012, (mk.atrPct || 0.0015) * 22));   // ~1R risk distance
       const regStop = (bus.regime && bus.regime.mult ? bus.regime.mult.stop : 1);
