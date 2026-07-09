@@ -147,10 +147,15 @@ function start(bus) {
           // most .L names — while our market prices are normalized pounds. ÷100 or every
           // gain/stop calculation on a London position is off by 100x.
           const avgPx = gbxTickers.has(pos.ticker) ? pos.averagePrice / 100 : pos.averagePrice;
+          // T212 reports the TRUE first-fill time — use it so hold-time clocks (hygiene,
+          // recycler, min-hold) survive reboots instead of resetting on every deploy,
+          // which froze all time-based exits on days with several restarts.
+          const trueOpenedAt = pos.initialFillDate ? new Date(pos.initialFillDate).getTime() : null;
           const local = Object.values(state.t212.positions).find(x => x.t212Ticker === pos.ticker);
           if (local) {
             local.qty = pos.quantity;  // sync with real fill
             local.entry = avgPx;
+            if (trueOpenedAt && (!local.openedAt || local.openedAt > trueOpenedAt)) local.openedAt = trueOpenedAt;
             local.pendingFill = false;  // fill is now confirmed, safe to exit
             continue;
           }
@@ -158,7 +163,7 @@ function start(bus) {
           const sym = rev[pos.ticker];
           if (sym) {
             state.t212.positions[sym] = { t212Ticker: pos.ticker, entry: avgPx, qty: pos.quantity,
-              invested: +(avgPx * pos.quantity).toFixed(2), opened: 'recovered', openedAt: Date.now(), peak: avgPx,
+              invested: +(avgPx * pos.quantity).toFixed(2), opened: 'recovered', openedAt: trueOpenedAt || Date.now(), peak: avgPx,
               conf: 0, sigType: 'adopted', reason: 'recovered from T212 account after restart' };
             console.log('[t212] adopted existing position ' + pos.ticker);
           }
