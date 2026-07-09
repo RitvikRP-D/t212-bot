@@ -546,19 +546,25 @@ function start(bus) {
       const friction = frictionPct(sym, prof, mk);
       const tpFloor = friction + (prof.minNetProfit || 0);  // don't bank a "profit" that fees would eat
       const netGain = gain - friction;                      // what you actually keep
-      // ⚡ SPIKE positions live by scalper rules: bank fast, cut fast, never linger.
+      // momentum read for exit decisions: is the last 1-min bar falling? two in a row?
+      const cls = mk.closes || [];
+      const oneRed = cls.length >= 2 && cls[cls.length - 1] < cls[cls.length - 2];
+      const twoRed = cls.length >= 3 && oneRed && cls[cls.length - 2] < cls[cls.length - 3];
+      const turnedDown = gain <= peakGain - 0.003 || twoRed;   // 0.3% off the peak, or two red bars
+      // ⚡ SPIKE positions live by scalper rules: ride the momentum, bank the turn, cut fast.
       if (p.sigType === 'SPIKE') {
         let sWhy = null;
-        if (netGain >= 0.012) sWhy = `⚡ scalp target +${(netGain * 100).toFixed(2)}% net — banking`;
+        if (netGain >= 0.012 && turnedDown) sWhy = `⚡ rode to +${(netGain * 100).toFixed(2)}% net, momentum turned — banking`;
         else if (peakGain >= 0.008 && gain <= peakGain - 0.005) sWhy = `⚡ spike fading (peak +${(peakGain * 100).toFixed(1)}% → +${(gain * 100).toFixed(1)}%) — banking`;
         else if (gain <= -0.01) sWhy = `⚡ spike failed ${(gain * 100).toFixed(1)}% — cutting fast`;
         else if (heldMin > 25 && netGain < 0.004) sWhy = `⚡ spike stalled ${heldMin.toFixed(0)}m — freeing the slot`;
         if (sWhy) { closePos(sym, ledger, book, p, mk, sWhy); continue; }
       }
-      // QUICK-BANK ROTATION: the whole strategy is take-the-profit-and-move — any position
-      // up past the quickTake threshold gets banked and the cash rotates into the next mover
-      if (prof.quickTake && matured && netGain >= prof.quickTake) {
-        closePos(sym, ledger, book, p, mk, `💰 quick bank +${(netGain * 100).toFixed(2)}% net — rotating to the next mover`);
+      // MOMENTUM-TRAIL BANK: past +1% net the winner is NOT capped — as long as it keeps
+      // climbing we hold, and the moment it turns down (0.3% off the peak or two straight
+      // red bars) the profit is banked and the cash rotates into the next mover.
+      if (prof.quickTake && matured && netGain >= prof.quickTake && turnedDown) {
+        closePos(sym, ledger, book, p, mk, `💰 rode past +${(prof.quickTake * 100).toFixed(0)}% to +${(netGain * 100).toFixed(2)}% net, turned down — banking & rotating`);
         continue;
       }
       // DEAD-MONEY RECYCLER (practice/high-risk): a position flat for 2h+ is a blocked
