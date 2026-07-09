@@ -141,6 +141,10 @@
     <div class="panel" id="riskbox">…</div>
     <h2>Top Signals <span class="u">bot conviction across the universe</span></h2>
     <div class="panel"><div class="feed"><table><thead><tr><th>Sym</th><th>Price</th><th>24h</th><th>Conf</th><th>Bot's read</th></tr></thead><tbody id="signals"></tbody></table></div></div>
+    <h2>🌊 Money Flow <span class="u" id="flow-u">which sectors are hot · which names lead them</span></h2>
+    <div class="panel" id="flowboard"><span class="muted">mapping the flow…</span></div>
+    <h2>🎓 Coach <span class="u" id="coach-u">nightly self-grading — lessons &amp; tuned parameters</span></h2>
+    <div class="panel" id="coachboard"><span class="muted">first lesson lands after the next close</span></div>
   </section>
 
   <!-- NEWS RADAR -->
@@ -409,6 +413,21 @@ function render(d){
   // everything below is informational — one malformed field must not stop the
   // cards/signals/positions/log from live-updating, so it is fenced off
   try{
+
+  // 🌊 money flow board
+  if(d.flow&&$('flowboard')){
+    const F=d.flow;
+    $('flow-u').textContent=(F.hot||[]).length?('hot: '+F.hot.join(', ')+' · updated '+(F.updated||'')):('no hot sector right now · '+(F.updated||''));
+    $('flowboard').innerHTML=
+      '<div style="margin-bottom:8px;">'+(F.sectors||[]).map(s=>`<span class="chip ${s.median>0.3?'green':s.median<-0.3?'red':''}">${esc(s.sector)} ${(s.median>0?'+':'')+s.median}% <span class="muted">(${s.n})</span></span>`).join(' ')+'</div>'
+      +((F.leaders||[]).length?(F.leaders||[]).map(l=>`<div class="callrow"><span style="width:64px;font-weight:700;flex-shrink:0;">${esc(l.sym)}</span><span class="green">+${l.pct}%</span> <span class="muted" style="font-size:10px;">${esc(l.sector)} · beats its sector by ${l.vsSector}pts · strength ${l.strength}</span></div>`).join(''):'<span class="muted">no sector leaders on volume right now</span>');
+  }
+  // 🎓 coach board
+  if(d.coach&&$('coachboard')){
+    const C=d.coach;
+    $('coach-u').textContent=(C.lastRun?('last graded: '+C.lastRun):'first grading after the next close')+(C.tuned&&Object.keys(C.tuned).length?' · tuned: '+Object.entries(C.tuned).map(([k,v])=>k+'='+v).join(', '):'');
+    $('coachboard').innerHTML=(C.lessons||[]).length?(C.lessons||[]).map(l=>`<div class="hl"><span class="muted" style="font-size:9px;width:70px;flex-shrink:0;">${esc((l.t||'').slice(5,16))}</span><span>${esc(l.msg)}</span></div>`).join(''):'<span class="muted">no lessons yet — the coach grades each day after the US close</span>';
+  }
 
   // RADAR + WAR + TRUMP LANE
   if(d.newsRadar){
