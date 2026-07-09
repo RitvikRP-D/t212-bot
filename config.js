@@ -77,10 +77,10 @@ const PROFILES = {
     nonGbpPenalty: 0, minNotionalPerMin: 5000, stopLoss: 0.018, dailyMaxLoss: 0.15,   // 5k/min floor: no unfillable junk
     minNetProfit: 0, dailyProfitTarget: 0,     // 0 = never stop compounding a good day
     maxDrawdown: 0.50,          // hard halt only at −50% (real profile keeps the −10% floor)
-    consensusMin: 1, sectorCap: 1.0, countryCap: 1.0, ladder: false,
+    consensusMin: 1, sectorCap: 0.6, countryCap: 0.75, ladder: false,   // correlated aggression = one big bet paying many spreads
     recoveryTrigger: 0.06, overnightHold: true,   // #1 fix: enable overnight hold on practice too
     overnightMinProfit: 0.001,  // #2 fix: don't hold unless gain > 0.1% net (beats fees)
-    volAdjustedSizing: false,   // #new②: scale position size inverse to realized vol
+    volAdjustedSizing: true,    // size inverse to realized vol — a 3%-ATR biotech gets half a 1%-ATR mega-cap's size
     sentimentDecay: false,      // #new④: weight headlines by age
   },
   real: {

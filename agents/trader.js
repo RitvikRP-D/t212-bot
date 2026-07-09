@@ -246,6 +246,9 @@ function start(bus) {
     if (!ev) { mk.lastConf = 0; mk.lastWhy = mk.rsi != null ? `no buy setup — RSI ${mk.rsi.toFixed(1)}${mk.rsi > 68 ? ' overbought' : ''}` : 'warming up'; return; }
     // NEWS VETO — clearly negative news kills the entry, whatever the chart says.
     if (newsScore <= -0.30) { mk.lastConf = 0; mk.lastWhy = `⛔ news veto (${newsScore.toFixed(2)}) — not buying into bad news`; return; }
+    // DATA-HEALTH GATE — when the sentinel says the price APIs are failing, entering is
+    // trading blind; hold fire until the data source recovers.
+    if (bus.sentinelStatus && bus.sentinelStatus.apiHealthy === false) { mk.lastWhy = (mk.lastWhy || '') + ' · ⏸ data source unhealthy'; return; }
     // STALE-QUOTE GUARD — the full scan pass takes ~40 min; entering on a price that old
     // is trading blind. Only fresh quotes (≤2 min) may trade; hot-lane names (holdings,
     // news, TV, movers) refresh every few seconds so real opportunities stay eligible.
@@ -406,6 +409,14 @@ function start(bus) {
     }
     mk.lastVotes = votes;
 
+    // BACKER-QUALITY DOCK — the perf scorecard knows which agents' votes have actually
+    // preceded winners. If EVERY backer of this entry is a historically money-losing
+    // voice (≥8 closed trades, net negative), demand more edge before following them.
+    if (votes.length && bus.perf && Array.isArray(bus.perf.byAgent) && bus.perf.byAgent.length) {
+      const losing = new Set(bus.perf.byAgent.filter(a => (a.wins + a.losses) >= 8 && a.pnl < 0).map(a => a.agent));
+      if (losing.size && votes.every(v => losing.has(v))) { conf *= 0.9; tvNote += ' · ⏸ backers historically losing'; }
+    }
+
     // ——— BULLSHIT-COMPANY FILTER — a pure technical blip on a name with ZERO news, ZERO
     // TradingView backing and ZERO desk interest is how junk enters the book. Spikes are
     // exempt (volume-confirmed momentum is its own thesis); everything else gets docked
@@ -503,21 +514,22 @@ function start(bus) {
           return;
         }
       }
-      // SECTOR / COUNTRY DIVERSIFICATION CAP (#6/#3fix): don't let the book pile into one theme.
-      // #3fix: explicit defaults for undefined caps (1.0 = no cap)
-      const held = Object.keys(state.t212.positions);
-      if (held.length >= 2) {
-        const afterN = held.length + 1;
-        const sec = sectorOf(sym), cty = countryOf(sym);
-        const sectorCap = prof.sectorCap != null ? prof.sectorCap : 1.0;  // #3fix: default to 1.0 (no cap)
-        const countryCap = prof.countryCap != null ? prof.countryCap : 1.0;
-        if (sec !== 'index' && sec !== 'other') {
-          const sameSec = held.filter(h => sectorOf(h) === sec).length + 1;
-          if (sameSec / afterN > sectorCap) { mk.lastWhy = (mk.lastWhy || '') + ` · ⏸ ${sec} already ${Math.round(sameSec / afterN * 100)}% of book`; return; }
-        }
-        const sameCty = held.filter(h => countryOf(h) === cty).length + 1;
-        if (sameCty / afterN > countryCap) { mk.lastWhy = (mk.lastWhy || '') + ` · ⏸ ${cty} already ${Math.round(sameCty / afterN * 100)}% of book`; return; }
+    }
+    // SECTOR / COUNTRY DIVERSIFICATION CAP — applies to EVERY profile now (it used to be
+    // real-only, which let max-variance mode stack 20 correlated bets: that isn't extra
+    // opportunity, it's the same bet many times while paying the spread on each).
+    const held = Object.keys(state.t212.positions);
+    if (held.length >= 2) {
+      const afterN = held.length + 1;
+      const sec = sectorOf(sym), cty = countryOf(sym);
+      const sectorCap = prof.sectorCap != null ? prof.sectorCap : 1.0;
+      const countryCap = prof.countryCap != null ? prof.countryCap : 1.0;
+      if (sec !== 'index' && sec !== 'other') {
+        const sameSec = held.filter(h => sectorOf(h) === sec).length + 1;
+        if (sameSec / afterN > sectorCap) { mk.lastWhy = (mk.lastWhy || '') + ` · ⏸ ${sec} already ${Math.round(sameSec / afterN * 100)}% of book`; return; }
       }
+      const sameCty = held.filter(h => countryOf(h) === cty).length + 1;
+      if (sameCty / afterN > countryCap) { mk.lastWhy = (mk.lastWhy || '') + ` · ⏸ ${cty} already ${Math.round(sameCty / afterN * 100)}% of book`; return; }
     }
     // SECOND, INDEPENDENT GUARD: the clock can still say "open" on an unlisted exchange
     // holiday (learned on July 4th — 26 orders blocked £9,996). So also require the newest
@@ -769,7 +781,11 @@ function start(bus) {
       state.dayLosses[k] = (state.dayLosses[k] || 0) + 1;
       if (state.dayLosses[k] >= 2) { (state.autoBlack = state.autoBlack || {})[sym] = today; console.log(`[trader] ${sym} benched for today — 2 losing trades`); }
     }
-    pushHist({ t: now(), sym, ledger, action: 'SELL', price: mk.price, qty: p.qty, pnl: +pnl.toFixed(2), why });
+    // exit-quality telemetry: what the trade gained vs what it SHOWED at its peak —
+    // the gap ("left on table") is the number that tunes exit rules honestly
+    const gainPct = p.entry ? +(((mk.price - p.entry) / p.entry) * 100).toFixed(2) : null;
+    const peakPct = p.entry && p.peak ? +(((p.peak - p.entry) / p.entry) * 100).toFixed(2) : null;
+    pushHist({ t: now(), sym, ledger, action: 'SELL', price: mk.price, qty: p.qty, pnl: +pnl.toFixed(2), gainPct, peakPct, why });
     console.log(`[trade] ${ledger} SELL ${sym} pnl=${pnl.toFixed(2)}`);
     bus.markDirty();
   }

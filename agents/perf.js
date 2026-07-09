@@ -52,7 +52,22 @@ function start(bus) {
     if (closed.length >= 8 && winRate < 45 && now > coolOffUntil) { coolOffUntil = now + 2 * 3600e3; reason = `win rate ${winRate}% over ${closed.length} trades`; }
     else if (streak >= 3 && now > coolOffUntil) { coolOffUntil = now + 1 * 3600e3; reason = `${streak} losses in a row`; }
 
-    bus.perf = { winRate, closed: closed.length, avgWin: +avgWin.toFixed(2), avgLoss: +avgLoss.toFixed(2), profitFactor, streak, coolOffUntil, bySig: bySig.slice(0, 12), byAgent, updated: new Date().toLocaleTimeString() };
+    // LEFT-ON-TABLE — mean gap between each trade's peak unrealized gain and where it
+    // actually exited. Large gap = exits too slow/loose; near zero = exits near-optimal.
+    const withPeak = closed.filter(h => h.peakPct != null && h.gainPct != null);
+    const leftOnTable = withPeak.length ? +(withPeak.reduce((a, h) => a + Math.max(0, h.peakPct - h.gainPct), 0) / withPeak.length).toFixed(2) : null;
+
+    bus.perf = { winRate, closed: closed.length, avgWin: +avgWin.toFixed(2), avgLoss: +avgLoss.toFixed(2), profitFactor, streak, coolOffUntil, leftOnTable, bySig: bySig.slice(0, 12), byAgent, updated: new Date().toLocaleTimeString() };
+
+    // DAILY 9PM SUMMARY — one honest recap pushed to the operator after the US close.
+    const ukHour = parseInt(new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/London', hour: 'numeric', hour12: false }).format(new Date()), 10);
+    const todayKey = new Date().toDateString();
+    if (ukHour >= 21 && state.lastDailySummary !== todayKey && bus.notify) {
+      state.lastDailySummary = todayKey;
+      const dg = bus.riskStatus && bus.riskStatus.dayGain;
+      bus.notify(`📊 Day recap — equity move ${dg != null ? dg + '%' : 'n/a'} · ${closed.length} trades closed all-time · win rate ${winRate}% · avg win ${avgWin.toFixed(2)} vs avg loss ${avgLoss.toFixed(2)}${leftOnTable != null ? ' · avg left-on-table ' + leftOnTable + '%' : ''}. Tomorrow starts fresh at the bell.`);
+      if (bus.markDirty) bus.markDirty();
+    }
     if (reason && coolOffUntil > now && warned !== coolOffUntil) {
       warned = coolOffUntil;
       console.log('[perf] cool-off: ' + reason);
