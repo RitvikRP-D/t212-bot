@@ -329,6 +329,18 @@ function start(bus) {
     // POWER-HOURS BOOST — intraday momentum concentrates in the first 30 min and the
     // last hour of the session (midday already gets docked separately).
     if (cl.length <= 30 || (m2cEarly != null && m2cEarly <= 60)) conf = Math.min(1, conf * 1.06);
+    // OPENING-SPREAD GUARD — the first minutes print the widest spreads of the session;
+    // only the gap lane (built for the open, needs news backing) is allowed to pay them.
+    if (cl.length <= 5 && ev.sigType !== 'GAP') { mk.lastConf = 0; mk.lastWhy = (mk.lastWhy || '') + ' · ⏸ first minutes — spreads at their widest'; return; }
+    // MARKET-TAPE GATE — a US long fights the whole tape when SPY is under its session
+    // VWAP; when the index is above it, longs get a small tailwind.
+    if (venue(sym) === 'US') {
+      const spy = bus.market['SPY'];
+      if (spy && spy.lastTickAt && Date.now() - spy.lastTickAt < 10 * 60e3 && spy.vwap && spy.price) {
+        if (spy.price < spy.vwap) { conf *= 0.88; tvNote += ' · SPY under VWAP (tape against longs)'; }
+        else conf = Math.min(1, conf * 1.03);
+      }
+    }
     // SYSTEM X2 fleet inputs —
     // historian: never fight a century of trend
     const lt = bus.longTerm && bus.longTerm[sym];
@@ -562,7 +574,13 @@ function start(bus) {
         // high vol (volRatio > 1.0) → smaller size; low vol (volRatio < 1.0) → normal/larger size
         volMul = Math.max(0.5, Math.min(1.2, 1 / (bus.regime.volRatio || 1)));   // capped between 0.5× and 1.2×
       }
-      const sizeMul = (reg && reg.mult ? reg.mult.size : 1) * (recovering ? 0.5 : 1) * volMul;   // regime + recovery + vol shrink size
+      // EXPECTANCY-ADAPTIVE SIZING — size up only with a PROVEN rolling edge (profit
+      // factor over ≥15 closed trades); shrink hard when the system is demonstrably cold.
+      let pfMul = 1;
+      if (bus.perf && bus.perf.closed >= 15 && bus.perf.profitFactor != null) {
+        pfMul = bus.perf.profitFactor >= 1.5 ? 1.15 : bus.perf.profitFactor >= 1.2 ? 1.05 : bus.perf.profitFactor < 0.8 ? 0.75 : 1;
+      }
+      const sizeMul = (reg && reg.mult ? reg.mult.size : 1) * (recovering ? 0.5 : 1) * volMul * pfMul;   // regime + recovery + vol + expectancy
       const frac = Math.min(prof.perTradeCap, (prof.sizeBase + conf * prof.sizeSlope) * sizeMul);
       const reserve = Math.max(2, cash * 0.02);          // keep a small cash reserve for fees/slippage
       let invest = Math.min(cash * frac, cash - reserve);

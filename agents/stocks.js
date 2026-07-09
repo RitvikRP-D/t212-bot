@@ -77,7 +77,8 @@ function start(bus) {
     // bus.tvHot wholesale every 25s, so injections there were wiped almost instantly
     const extra = (bus.hotExtra || []).filter(x => Date.now() - x.at < 15 * 60e3).map(x => x.sym);
     if (bus.hotExtra && extra.length !== bus.hotExtra.length) bus.hotExtra = bus.hotExtra.filter(x => Date.now() - x.at < 15 * 60e3);
-    const hot = [...new Set([...holdings, ...extra, ...(bus.tvHot || []), ...open.filter(s => (bus.market[s]?.lastConf || 0) >= 0.15)])].filter(marketOpen);
+    // SPY is pinned hot: the trader's market-tape gate needs a fresh index read at all times
+    const hot = [...new Set([...holdings, 'SPY', ...extra, ...(bus.tvHot || []), ...open.filter(s => (bus.market[s]?.lastConf || 0) >= 0.15)])].filter(marketOpen);
     if (slot % HOT_EVERY === 0 && hot.length) { fetchSym(hot[hotIdx++ % hot.length]); return; }
     // FULL-PASS LANE with junk deprioritization: a full rotation over ~7k open names takes
     // ~40 min, so every wasted slot matters. Names already known to be illiquid junk
